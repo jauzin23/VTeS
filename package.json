@@ -1,0 +1,26 @@
+{
+  "name": "VF-TeS",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "cd server && .\\venv\\Scripts\\python -m uvicorn main:app --host 0.0.0.0 --port 3001",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "express": "^5.2.1",
+    "lru-cache": "^11.5.0",
+    "p-queue": "^9.3.0",
+    "playwright": "^1.60.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@jest/globals": "^30.4.1",
+    "jest": "^30.4.2"
+  }
+}

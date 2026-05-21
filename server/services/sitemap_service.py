@@ -1,0 +1,257 @@
+import asyncio
+import logging
+import httpx
+import xml.etree.ElementTree as ET
+from urllib.parse import urlparse
+from .discover import discover_urls, normalize_url
+from .crawler import crawl_page
+from .html_processor import inject_iframe_script
+from .browser import browser_manager
+
+logger = logging.getLogger("h_audit.sitemap")
+
+MAX_SITEMAP_URLS = 200   # Maximum URLs to process from sitemap
+CRAWL_CONCURRENCY = 5    # Concurrent page crawls
+
+
+def strip_www(netloc: str) -> str:
+    """Return netloc without a leading 'www.' for fuzzy domain matching."""
+    n = netloc.lower()
+    return n[4:] if n.startswith("www.") else n
+
+
+def same_site(netloc_a: str, netloc_b: str) -> bool:
+    """True if two netlocs refer to the same website (www-insensitive)."""
+    return strip_www(netloc_a) == strip_www(netloc_b)
+
+
+def normalize_base_url(raw: str) -> str:
+    """Normalize an input like 'example.com' or 'https://example.com' to https://example.com"""
+    raw = raw.strip()
+    if not raw.startswith(("http://", "https://")):
+        raw = "https://" + raw
+    parsed = urlparse(raw)
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+async def fetch_sitemap_urls(base_url: str) -> list[str]:
+    """Fetch /sitemap.xml from the given base URL and return all <loc> page URLs.
+    Handles sitemap index files recursively. Tries both www and non-www variants."""
+    parsed = urlparse(base_url)
+    base_netloc = parsed.netloc
+
+    # Build candidate sitemap URLs: original first, then www/non-www alternative
+    candidates = [base_url.rstrip("/") + "/sitemap.xml"]
+    if base_netloc.startswith("www."):
+        alt = f"{parsed.scheme}://{base_netloc[4:]}/sitemap.xml"
+    else:
+        alt = f"{parsed.scheme}://www.{base_netloc}/sitemap.xml"
+    candidates.append(alt)
+
+    urls = []
+    try:
+        async with httpx.AsyncClient(
+            timeout=15.0,
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; SitemapBot/1.0)"}
+        ) as client:
+            for sitemap_url in candidates:
+                logger.info(f"Fetching sitemap: {sitemap_url}")
+                urls = await _fetch_and_parse_sitemap(client, sitemap_url, base_url, depth=0)
+                if urls:
+                    break
+                logger.info(f"No URLs found from {sitemap_url}, trying next candidate...")
+    except Exception as e:
+        logger.error(f"Failed to fetch sitemap: {e}")
+
+    logger.info(f"Sitemap discovered {len(urls)} URLs total")
+    return urls[:MAX_SITEMAP_URLS]
+
+
+async def _fetch_and_parse_sitemap(client: httpx.AsyncClient, sitemap_url: str, base_url: str, depth: int = 0) -> list[str]:
+    """Recursively parse sitemap or sitemap index XML."""
+    if depth > 3:
+        return []
+
+    try:
+        resp = await client.get(sitemap_url)
+        if resp.status_code != 200:
+            logger.warning(f"Sitemap HTTP {resp.status_code}: {sitemap_url}")
+            return []
+    except Exception as e:
+        logger.warning(f"Error fetching {sitemap_url}: {e}")
+        return []
+
+    content = resp.text
+    urls = []
+
+    try:
+        root = ET.fromstring(content)
+        tag = root.tag.lower()
+
+        # Sitemap index - contains nested sitemaps
+        if "sitemapindex" in tag:
+            logger.info(f"Found sitemap index at {sitemap_url}")
+            nested_urls = []
+            for sitemap_elem in root.iter():
+                if sitemap_elem.tag.endswith("}loc") or sitemap_elem.tag == "loc":
+                    nested_sitemap_url = sitemap_elem.text.strip() if sitemap_elem.text else ""
+                    if nested_sitemap_url:
+                        nested_urls.append(nested_sitemap_url)
+
+            # Fetch nested sitemaps concurrently (limit to 10)
+            tasks = [
+                _fetch_and_parse_sitemap(client, url, base_url, depth + 1)
+                for url in nested_urls[:10]
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for r in results:
+                if isinstance(r, list):
+                    urls.extend(r)
+
+        # Regular sitemap - contains page <loc> elements
+        elif "urlset" in tag:
+            base_netloc = urlparse(base_url).netloc
+            for elem in root.iter():
+                if elem.tag.endswith("}loc") or elem.tag == "loc":
+                    loc = elem.text.strip() if elem.text else ""
+                    if loc and loc.startswith(("http://", "https://")):
+                        # Skip non-HTML resources (PDFs, images, etc.)
+                        # Check the URL *path* (ignoring query string)
+                        loc_path = urlparse(loc).path.lower()
+                        if loc_path.endswith((".pdf", ".jpg", ".jpeg", ".png", ".gif",
+                                              ".svg", ".webp", ".zip", ".docx", ".xlsx",
+                                              ".pptx", ".doc", ".xls", ".csv", ".mp4",
+                                              ".mp3", ".avi", ".mov", ".wmv")):
+                            continue
+                        # Accept URLs from same site (www-insensitive)
+                        if same_site(urlparse(loc).netloc, base_netloc):
+                            urls.append(loc)
+
+    except ET.ParseError as e:
+        logger.warning(f"XML parse error for {sitemap_url}: {e}")
+
+    return urls
+
+
+async def run_sitemap_audit(raw_input: str) -> dict:
+    """
+    Main sitemap audit function.
+    1. Normalize the input to a base URL
+    2. Fetch /sitemap.xml
+    3. For each URL in sitemap, check for pagination and discover sub-pages
+    4. Audit headings on each discovered page
+    5. Return structured results
+    """
+    base_url = normalize_base_url(raw_input)
+    logger.info(f"Starting sitemap audit for: {base_url}")
+
+    # Step 1: Get sitemap URLs
+    sitemap_urls = await fetch_sitemap_urls(base_url)
+
+    if not sitemap_urls:
+        return {
+            "baseUrl": base_url,
+            "sitemapUrl": base_url + "/sitemap.xml",
+            "status": "no_sitemap",
+            "message": "Não foi possível obter URLs do sitemap.xml",
+            "pages": [],
+            "totalPages": 0,
+        }
+
+    logger.info(f"Processing {len(sitemap_urls)} URLs from sitemap")
+
+    # Step 2: For each sitemap URL, discover paginated sub-pages and audit headings inside a session context
+    results = []
+
+    async with browser_manager.session_context(seed_url=base_url) as context:
+        all_pages_to_audit = set()
+
+        async def discover_for_url(url: str):
+            """Discover paginated sub-pages for a given sitemap URL."""
+            try:
+                sub_pages = await discover_urls(url, context=context)
+                if sub_pages:
+                    for p in sub_pages:
+                        all_pages_to_audit.add(normalize_url(p))
+                else:
+                    # No pagination found - just audit the URL itself
+                    all_pages_to_audit.add(normalize_url(url))
+            except Exception as e:
+                logger.warning(f"Discovery failed for {url}: {e}")
+                all_pages_to_audit.add(normalize_url(url))
+
+        # Run discovery with limited concurrency
+        discovery_sem = asyncio.Semaphore(4)
+        async def guarded_discover(url: str):
+            async with discovery_sem:
+                await discover_for_url(url)
+
+        await asyncio.gather(
+            *(guarded_discover(url) for url in sitemap_urls),
+            return_exceptions=True
+        )
+
+        logger.info(f"Total pages to audit after discovery: {len(all_pages_to_audit)}")
+
+        # Step 3: Audit headings on each page
+        audit_sem = asyncio.Semaphore(CRAWL_CONCURRENCY)
+        results_lock = asyncio.Lock()
+
+        async def audit_page(url: str):
+            async with audit_sem:
+                try:
+                    logger.info(f"Auditing: {url}")
+                    crawl = await crawl_page(url, context=context)
+                    processed_html = inject_iframe_script(
+                        crawl.get("renderedHtml", ""),
+                        crawl["finalUrl"]
+                    )
+                    async with results_lock:
+                        results.append({
+                            "url": url,
+                            "finalUrl": crawl["finalUrl"],
+                            "headings": crawl["headings"],
+                            "issues": crawl["result"]["issues"],
+                            "status": crawl["result"]["status"],
+                            "issueCount": len(crawl["result"]["issues"]),
+                            "hasFailures": any(i["severity"] == "FAIL" for i in crawl["result"]["issues"]),
+                            "processedHtml": processed_html,
+                        })
+                except Exception as e:
+                    logger.warning(f"Audit failed for {url}: {e}")
+                    async with results_lock:
+                        results.append({
+                            "url": url,
+                            "finalUrl": url,
+                            "headings": [],
+                            "issues": [],
+                            "status": "ERROR",
+                            "issueCount": 0,
+                            "hasFailures": False,
+                            "processedHtml": None,
+                            "error": str(e),
+                        })
+
+        await asyncio.gather(
+            *(audit_page(url) for url in list(all_pages_to_audit)),
+            return_exceptions=True
+        )
+
+    # Sort results by URL
+    results.sort(key=lambda r: r["url"])
+
+    total_issues = sum(r["issueCount"] for r in results)
+    pages_with_failures = sum(1 for r in results if r.get("status") == "ERROR" or r.get("hasFailures"))
+    pages_with_warnings = sum(1 for r in results if r.get("status") != "ERROR" and not r.get("hasFailures") and any(i["severity"] == "REVIEW" for i in r.get("issues", [])))
+
+    return {
+        "baseUrl": base_url,
+        "sitemapUrl": base_url + "/sitemap.xml",
+        "status": "completed",
+        "totalPages": len(results),
+        "totalIssues": total_issues,
+        "pagesWithFailures": pages_with_failures,
+        "pagesWithWarnings": pages_with_warnings,
+        "pages": results,
+    }
