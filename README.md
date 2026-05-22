@@ -1,24 +1,25 @@
-# VF-TeS (Títulos e Subtítulos)
+<div align="center">
+   <h1>VTeS (Validador de Títulos e Subtítulos)</h1>
+   <p>
+   <img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white" />
+   <img src="https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white" />
 
-Esta é uma ferramenta desenvolvida para validar a estrutura de cabeçalhos (H1, H2, H3, etc.) em páginas web.
-[![](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)]() [![](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)]() [![](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)]() [![](https://img.shields.io/badge/Next.js-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)]() [![](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)]() [![](https://img.shields.io/badge/Tailwind_CSS-38B2AC?style=for-the-badge&logo=tailwindcss&logoColor=white)]() [![](https://img.shields.io/badge/Playwright-2EAD33?style=for-the-badge&logo=playwright&logoColor=white)]() [![](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)]()
+<img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" />
 
-## Funcionalidades Principais
+<img src="https://img.shields.io/badge/Next.js-000000?style=for-the-badge&logo=nextdotjs&logoColor=white" />
+<img src="https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" />
+<img src="https://img.shields.io/badge/Tailwind_CSS-38B2AC?style=for-the-badge&logo=tailwindcss&logoColor=white" />
 
-- **Validação de Página Única**: Análise da estrutura de cabeçalhos de um URL específico.
-- **Validação de Sitemap**: Extração e análise de múltiplas páginas a partir do URL de um sitemap.xml.
-- **Validação via Crawler**: Exploração e verificação automática de um website.
-- **Validação Multi-URL**: Análise de uma lista de URLs.
-- **Validação Visual**: Interface que permite identificar a hierarquia dos cabeçalhos na página.
+<img src="https://img.shields.io/badge/Playwright-2EAD33?style=for-the-badge&logo=playwright&logoColor=white" />
 
-## Arquitetura do Projeto
+<img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" /> 
+   </p>
+</div>
+Esta é uma ferramenta desenvolvida para validar a estrutura de cabeçalhos em páginas web.
 
-A aplicação está dividida em dois componentes principais:
+---
 
-- **Frontend (/client)**: Next.js com Tailwind CSS.
-- **Backend (/server)**: API desenvolvida em Python (FastAPI) e Playwright, responsável pela execução dos processos de extração (crawling) e análise assíncrona.
-
-## Instruções de Utilização
+## 1. Instruções
 
 ### Pré-requisitos
 
@@ -26,18 +27,44 @@ A aplicação está dividida em dois componentes principais:
 
 ### Iniciar a Aplicação
 
-1. Execute o seguinte comando para iniciar os serviços:
+1. Execute o seguinte comando:
    ```bash
    docker-compose up --build -d
    ```
-2. Aguarde até ao arranque.
-3. Abra e aceda à ferramenta através do endereço: **http://localhost:3002**
-4. A API do backend ficará disponível em **http://localhost:3004**
+2. Abra e aceda à ferramenta através do endereço: **http://localhost:3002**
+3. A API do backend ficará disponível em **http://localhost:3004**
 
-## Como Utilizar a Interface
+---
 
-1. Selecione o método pretendido no menu (Página Única, Sitemap, Crawler ou Multi-URL).
-2. Insira o URL alvo ou a lista de URLs no campo de texto indicado.
-3. Clique no botão de submissão e aguarde pelos resultados.
+## 2. Utilização
 
-Em caso de dúvidas na utilização da ferramenta ou para reportar anomalias, por favor contacte a equipa de desenvolvimento.
+A plataforma tem quatro modos. Abaixo, está como utilizar o modo de **Página Única**.
+
+### Página Única
+
+Este modo permite inserir um URL e retorna possíveis problemas com a hierarquia de títulos e subtítulos.
+
+<div align="center">
+  <img src="./docs/screenshots/pagina_unica.png" alt="Modo Página Única" style="max-width: 100%; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0px 4px 15px rgba(0,0,0,0.1);" />
+</div>
+
+1. No menu, selecione **Página Única**.
+2. Introduza o endereço web (exemplo: `https://www.alenquer.pt`).
+3. Clique no botão.
+
+O sistema irá processar a página e devolver o resultado com duas áreas:
+
+- **Relatório de Hierarquia**: Uma extração que apresenta se a árvore de H1, H2 e H3 está consistente.
+- **Visualização da Página**: A página é renderizada com as secções de TeS em destaque, permitindo visualizar o posicionamento de cada cabeçalho.
+
+<div align="center">
+  <img src="./docs/screenshots/resultado_iframe.png" alt="Exemplo da Auditoria de Página com renderização no iframe" style="max-width: 100%; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0px 4px 15px rgba(0,0,0,0.1);" />
+</div>
+
+### Outros Modos Disponíveis
+
+- **Sitemap**: Extração e análise de múltiplas páginas a partir do URL de um sitemap.xml.
+
+- **Crawler**: Exploração e verificação automática de um website.
+
+- **Validação Multi-URL**: Análise de uma lista de URLs.
