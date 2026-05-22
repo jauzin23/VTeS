@@ -4,7 +4,7 @@ services:
       context: ./server
       dockerfile: Dockerfile
     ports:
-      - "3001:3001"
+      - "3004:3001"
     environment:
       - PLAYWRIGHT_HEADLESS=True
       - PLAYWRIGHT_MAX_TABS=10
@@ -19,9 +19,9 @@ services:
       context: ./client
       dockerfile: Dockerfile
       args:
-        - NEXT_PUBLIC_API_URL=http://localhost:3001
+        - NEXT_PUBLIC_API_URL=http://localhost:3004
     ports:
-      - "3000:80"
+      - "3002:80"
     depends_on:
       - backend
     restart: unless-stopped

@@ -275,11 +275,11 @@ async def discover_paginated_pages(start_url: str, context=None, audit_cache: di
 
             try:
                 await page.locator(
-                    ".ant-pagination, .pagination--select, .events-card__link-wrapper, .events-card, .ant-list-item, .ant-card, .article, .content, [class*='card'], [class*='item'], img"
-                ).first.wait_for(timeout=4000)
+                    ".ant-pagination, .pagination--select, .events-card__link-wrapper, .events-card, .ant-list-item, .ant-card, .article, [class*='card'], [class*='item']"
+                ).first.wait_for(timeout=5000)
             except Exception:
                 pass
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(2.0)
 
             try:
                 dom_pag = await page.evaluate(JS_DETETAR_PAGINACAO)
@@ -293,9 +293,6 @@ async def discover_paginated_pages(start_url: str, context=None, audit_cache: di
             except Exception:
                 next_data = None
                 html = ""
-
-            if html:
-                await audit_and_cache_page(page, normalized_start_url, html, audit_cache)
 
             total_pages = 1
             param_name = "page"
@@ -364,15 +361,11 @@ async def discover_paginated_pages(start_url: str, context=None, audit_cache: di
 
                         try:
                             await page.locator(
-                                ".ant-pagination, .pagination--select, .events-card__link-wrapper, .events-card, .ant-list-item, .ant-card, .article, .content, [class*='card'], [class*='item'], img"
-                            ).first.wait_for(timeout=3000)
+                                ".ant-pagination, .pagination--select, .events-card__link-wrapper, .events-card, .ant-list-item, .ant-card, .article, [class*='card'], [class*='item']"
+                            ).first.wait_for(timeout=4000)
                         except Exception:
                             pass
-                        try:
-                            subsequent_html = await page.content()
-                            await audit_and_cache_page(page, normalized_next, subsequent_html, audit_cache)
-                        except Exception:
-                            pass
+                        await asyncio.sleep(1.5)
                         next_dom = await page.evaluate(JS_DETETAR_PAGINACAO)
                         current_next = normalize_url(next_dom.get("nextHref") or "") if next_dom.get("nextHref") else ""
                     except Exception as e:
@@ -548,6 +541,7 @@ JS_EXTRACT_DETAIL_LINKS = r"""
             if (url.pathname === start.pathname && url.search === start.search) return true;
             if (url.pathname.length <= 1) return true;
             if (detailPathIgnores.test(url.pathname)) return true;
+            if (/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|zip|rar)$/i.test(url.pathname)) return true;
             if (/\/page\/\d+/i.test(url.pathname) && !url.search) return true;
             if (/^(?:\/?(page|pagina|p)\/?\d+)$/.test(url.pathname.replace(/\/+$/, ""))) return true;
             return false;
@@ -701,10 +695,10 @@ async def discover_urls(start_url: str, context=None, audit_cache: dict = None) 
 
             # Wait for listings
             try:
-                await page.locator(".ant-pagination, .ant-list-item, .ant-card, .article, .content, .events-card__link-wrapper, [class*='card'], [class*='item'], img").first.wait_for(timeout=4000)
+                await page.locator(".ant-pagination, .ant-list-item, .ant-card, .article, .events-card__link-wrapper, [class*='card'], [class*='item']").first.wait_for(timeout=5000)
             except Exception:
                 pass
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(2.0)
 
             # Detect pagination DOM
             try:
@@ -720,9 +714,6 @@ async def discover_urls(start_url: str, context=None, audit_cache: dict = None) 
             except Exception:
                 next_data = None
                 html = ""
-
-            if html and audit_cache is not None:
-                await audit_and_cache_page(page, normalized_start_url, html, audit_cache)
 
             # Compute pagination details
             total_pages = 1
@@ -809,12 +800,6 @@ async def discover_urls(start_url: str, context=None, audit_cache: dict = None) 
                     await scroll_down_page(page)
 
                     await asyncio.sleep(0.5)
-                    try:
-                        html = await page.content()
-                    except Exception:
-                        html = ""
-                    if html and audit_cache is not None:
-                        await audit_and_cache_page(page, resolved, html, audit_cache)
 
                     links = await page.evaluate(JS_EXTRACT_DETAIL_LINKS, [resolved, DETAIL_PATH_IGNORES.pattern])
                     for l in links:

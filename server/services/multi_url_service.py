@@ -9,7 +9,7 @@ from .browser import browser_manager
 logger = logging.getLogger("h_audit.multi_url")
 
 CRAWL_CONCURRENCY = 5
-DISCOVERY_CONCURRENCY = 4
+DISCOVERY_CONCURRENCY = 1
 
 
 async def run_multi_url_audit(raw_urls: list[str]) -> dict:
@@ -74,19 +74,19 @@ async def run_multi_url_audit(raw_urls: list[str]) -> dict:
 
             has_pagination = len(normalized_pages) > 1
 
-            if has_pagination:
-                try:
-                    detail_pages = await discover_urls(input_url, context=context, audit_cache=audit_cache)
-                except Exception as e:
-                    logger.warning(f"Detail discovery failed for {input_url}: {e}")
-                    detail_pages = []
+            # ALWAYS run detail discovery, whether there's pagination or not
+            try:
+                detail_pages = await discover_urls(input_url, context=context, audit_cache=audit_cache)
+            except Exception as e:
+                logger.warning(f"Detail discovery failed for {input_url}: {e}")
+                detail_pages = []
 
-                for page in detail_pages:
-                    normalized_page = normalize_url(page)
-                    if normalized_page not in normalized_pages:
-                        normalized_pages.append(normalized_page)
-                    all_pages_to_audit.add(normalized_page)
-                    page_to_group[normalized_page] = input_url
+            for page in detail_pages:
+                normalized_page = normalize_url(page)
+                if normalized_page not in normalized_pages:
+                    normalized_pages.append(normalized_page)
+                all_pages_to_audit.add(normalized_page)
+                page_to_group[normalized_page] = input_url
 
             groups_map[input_url] = {
                 "inputUrl": input_url,
