@@ -92,7 +92,7 @@ async def lifespan(app: FastAPI):
     await browser_manager.close()
 
 
-app = FastAPI(title="VF-TeS API - Títulos e Subtítulos", lifespan=lifespan)
+app = FastAPI(title="VTeS API - Títulos e Subtítulos", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
