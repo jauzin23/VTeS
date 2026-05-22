@@ -1,0 +1,29 @@
+# Node / Frontend ignores
+node_modules/
+client/node_modules/
+client/.next/
+client/dist/
+client/out/
+.next/
+out/
+dist/
+*.tsbuildinfo
+
+# Python / Backend ignores
+server/venv/
+server/__pycache__/
+__pycache__/
+.venv/
+venv/
+*.py[cod]
+*$py.class
+server/evidence/
+
+# Environment configurations (failsafe)
+.env
+.env.local
+.env.*.local
+
+# OS files
+.DS_Store
+Thumbs.db

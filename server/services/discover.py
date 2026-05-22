@@ -184,7 +184,47 @@ def inspect_xhr_response(json_data: any) -> dict | None:
     return None
 
 
-async def discover_paginated_pages(start_url: str, context=None) -> list[str]:
+async def audit_and_cache_page(page, url: str, html: str, audit_cache: dict | None):
+    if audit_cache is None or url in audit_cache:
+        return
+    try:
+        from bs4 import BeautifulSoup
+        from datetime import datetime
+        from .crawler import HEADING_ANALYZER, JS_EXTRACT_HEADINGS
+
+        headings = await page.evaluate(JS_EXTRACT_HEADINGS)
+        final_url = page.url
+        soup = BeautifulSoup(html, "html.parser")
+        res = await HEADING_ANALYZER.analyze(page, soup, final_url)
+        
+        aspect_result = {
+            "status": res.status,
+            "issues": [
+                {
+                    "rule": iss.rule,
+                    "severity": iss.severity,
+                    "message": iss.message,
+                    "element": iss.element,
+                    "xpath": iss.xpath,
+                    "details": iss.details,
+                }
+                for iss in res.issues
+            ]
+        }
+        
+        audit_cache[url] = {
+            "headings": headings,
+            "finalUrl": final_url,
+            "renderedHtml": html,
+            "result": aspect_result,
+            "auditadoEm": datetime.utcnow().isoformat() + "Z",
+        }
+        logger.info(f"Audited and cached page during discovery: {url}")
+    except Exception as e:
+        logger.warning(f"Failed to audit and cache page {url} during discovery: {e}")
+
+
+async def discover_paginated_pages(start_url: str, context=None, audit_cache: dict = None) -> list[str]:
     normalized_start_url = normalize_url(start_url)
     discovered_pages = [normalized_start_url]
     discovered_set = {normalized_start_url}
@@ -252,6 +292,10 @@ async def discover_paginated_pages(start_url: str, context=None) -> list[str]:
                 next_data = extract_next_data(html)
             except Exception:
                 next_data = None
+                html = ""
+
+            if html:
+                await audit_and_cache_page(page, normalized_start_url, html, audit_cache)
 
             total_pages = 1
             param_name = "page"
@@ -324,6 +368,11 @@ async def discover_paginated_pages(start_url: str, context=None) -> list[str]:
                             ).first.wait_for(timeout=3000)
                         except Exception:
                             pass
+                        try:
+                            subsequent_html = await page.content()
+                            await audit_and_cache_page(page, normalized_next, subsequent_html, audit_cache)
+                        except Exception:
+                            pass
                         next_dom = await page.evaluate(JS_DETETAR_PAGINACAO)
                         current_next = normalize_url(next_dom.get("nextHref") or "") if next_dom.get("nextHref") else ""
                     except Exception as e:
@@ -360,7 +409,7 @@ async () => {
 
     const itensAntd = Array.from(document.querySelectorAll('li.ant-pagination-item[title]'));
     if (itensAntd.length) {
-        const numeros = itensAntd.map(li => parseInt(li.getAttribute('title'))).filter(n => !isNaN(n));
+        const numeros = itensAntd.map(li => parseInt(li.getAttribute('title'))).filter(n => !isNaN(n) && !(n >= 1900 && n <= 2100) && n <= 5000);
         if (numeros.length) saida.paginacao_total = Math.max(...numeros);
         const ativo = document.querySelector('li.ant-pagination-item-active[title]');
         if (ativo) {
@@ -390,7 +439,7 @@ async () => {
                 sel.click();
                 await esperar(200);
                 const options = Array.from(document.querySelectorAll('.ant-select-item-option[title], .ant-select-item-option'));
-                const numeros = options.map(o => parseInt(o.getAttribute('title') || o.textContent)).filter(n => !isNaN(n));
+                const numeros = options.map(o => parseInt(o.getAttribute('title') || o.textContent)).filter(n => !isNaN(n) && !(n >= 1900 && n <= 2100) && n <= 5000);
                 if (numeros.length) {
                     saida.paginacao_total = Math.max(...numeros);
                     saida.deteccao = 'antd_select_options';
@@ -408,7 +457,8 @@ async () => {
                 const m = txt.match(/(?:page|página)?\s*(\d+)\s*(?:de|of|from|\/)\s*(\d+)/i);
                 if (m && m[2]) {
                     const v = parseInt(m[2]);
-                    if (v > 1 && v < 5000) {
+                    // Ignore years (1900-2100) to prevent interpreting "1 de 2025" as 2025 pages
+                    if (v > 1 && v < 5000 && !(v >= 1900 && v <= 2100)) {
                         saida.paginacao_total = v;
                         saida.deteccao = 'label_de_n';
                         break;
@@ -448,7 +498,12 @@ async () => {
         document.querySelectorAll(s).forEach(el => {
             const txt = (el.textContent || '').trim();
             const n = parseInt(txt);
-            if (!isNaN(n) && n > maxN) maxN = n;
+            if (!isNaN(n)) {
+                // Prevent years from being parsed as page numbers
+                if (!(n >= 1900 && n <= 2100) && n <= 5000) {
+                    if (n > maxN) maxN = n;
+                }
+            }
             if (el.href) {
                 try {
                     const u = new URL(el.href, window.location.href);
@@ -591,7 +646,7 @@ JS_EXTRACT_DETAIL_LINKS = r"""
 }
 """
 
-async def discover_urls(start_url: str, context=None) -> list[str]:
+async def discover_urls(start_url: str, context=None, audit_cache: dict = None) -> list[str]:
     discovered_detail_urls = set()
     visited_listing_pages = set()
     api_captured = None
@@ -665,6 +720,9 @@ async def discover_urls(start_url: str, context=None) -> list[str]:
             except Exception:
                 next_data = None
                 html = ""
+
+            if html and audit_cache is not None:
+                await audit_and_cache_page(page, normalized_start_url, html, audit_cache)
 
             # Compute pagination details
             total_pages = 1
@@ -751,6 +809,13 @@ async def discover_urls(start_url: str, context=None) -> list[str]:
                     await scroll_down_page(page)
 
                     await asyncio.sleep(0.5)
+                    try:
+                        html = await page.content()
+                    except Exception:
+                        html = ""
+                    if html and audit_cache is not None:
+                        await audit_and_cache_page(page, resolved, html, audit_cache)
+
                     links = await page.evaluate(JS_EXTRACT_DETAIL_LINKS, [resolved, DETAIL_PATH_IGNORES.pattern])
                     for l in links:
                         discovered_detail_urls.add(normalize_url(l))

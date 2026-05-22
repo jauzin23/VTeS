@@ -79,8 +79,12 @@ JS_COOKIE_ACCEPT = r"""
 }
 """
 
-async def crawl_page(url: str, context=None) -> dict:
+async def crawl_page(url: str, context=None, audit_cache: dict = None) -> dict:
     """Crawl a single page and return heading audit results."""
+    if audit_cache and url in audit_cache:
+        logger.info(f"Returning cached audit for: {url}")
+        return audit_cache[url]
+
     headings = []
     final_url = ""
     from bs4 import BeautifulSoup
@@ -91,11 +95,11 @@ async def crawl_page(url: str, context=None) -> dict:
         logger.info(f"Navigating to {url}")
 
         try:
-            response = await page.goto(url, wait_until="domcontentloaded", timeout=10000)
+            response = await page.goto(url, wait_until="load", timeout=15000)
         except Exception as e:
-            logger.warning(f"Failed to load {url} with 'domcontentloaded' state: {e}. Trying 'commit' fallback...")
+            logger.warning(f"Failed to load {url} with 'load' state: {e}. Trying 'domcontentloaded' fallback...")
             try:
-                response = await page.goto(url, wait_until="commit", timeout=5000)
+                response = await page.goto(url, wait_until="domcontentloaded", timeout=8000)
             except Exception as e2:
                 logger.warning(f"Failed fallback navigation to {url}: {e2}")
                 response = None
@@ -104,15 +108,21 @@ async def crawl_page(url: str, context=None) -> dict:
             status = response.status if response else 500
             raise Exception(f"HTTP {status}")
 
-        await asyncio.sleep(0.8)
+        await asyncio.sleep(2.0)
 
-        # Accept cookies
+        # Accept cookies (try multiple times to catch delayed banners)
+        for _ in range(3):
+            try:
+                await page.evaluate(JS_COOKIE_ACCEPT)
+            except Exception:
+                pass
+            await asyncio.sleep(0.8)
+
+        # Wait for generic content elements to verify the loader is gone
         try:
-            await page.evaluate(JS_COOKIE_ACCEPT)
+            await page.wait_for_selector('a[href], article, main, h1, h2, img', timeout=5000)
         except Exception:
             pass
-
-        await asyncio.sleep(0.3)
 
         # Full scroll down to ensure dynamic content / lazy loaded headings are loaded
         await scroll_down_page(page)
@@ -139,10 +149,15 @@ async def crawl_page(url: str, context=None) -> dict:
             ]
         }
 
-    return {
+    from datetime import datetime
+    res_dict = {
         "headings": headings,
         "finalUrl": final_url,
         "renderedHtml": rendered_html,
         "result": aspect_result,
+        "auditadoEm": datetime.utcnow().isoformat() + "Z",
     }
+    if audit_cache is not None:
+        audit_cache[url] = res_dict
+    return res_dict
 

@@ -15,6 +15,7 @@ import {
   ZoomIn,
   ZoomOut,
   Eye,
+  Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -552,7 +553,6 @@ function SitemapPageRow({
   index: number;
 }) {
   const [open, setOpen] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
   const [selectedHeading, setSelectedHeading] = useState<number | null>(null);
   const [zoom, setZoom] = useState(0.45);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -641,34 +641,35 @@ function SitemapPageRow({
               <span>{page.error ?? "Erro desconhecido"}</span>
             </div>
           ) : (
-            <>
-              {/* Issues + Headings side by side */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+              {/* Left column (Problems, Headings, timestamp) */}
+              <div className="lg:col-span-5 space-y-4">
                 <div>
                   <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
                     Problemas
                   </h4>
-                  <div className="max-h-64 overflow-y-auto">
+                  <div className="max-h-[220px] overflow-y-auto border rounded-lg bg-white p-2">
                     <IssueList
                       issues={page.issues}
                       onHighlight={
-                        page.processedHtml && showPreview
+                        page.processedHtml
                           ? handleHighlightXPath
                           : undefined
                       }
                     />
                   </div>
                 </div>
+
                 <div>
                   <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
                     Árvore de Cabeçalhos ({page.headings.length})
                   </h4>
-                  <div className="max-h-64 overflow-y-auto border rounded-lg p-2 bg-white">
+                  <div className="max-h-[260px] overflow-y-auto border rounded-lg p-2 bg-white">
                     <HeadingTree
                       headings={page.headings}
                       compact
                       onSelect={
-                        page.processedHtml && showPreview
+                        page.processedHtml
                           ? handleSelectHeading
                           : undefined
                       }
@@ -676,82 +677,84 @@ function SitemapPageRow({
                     />
                   </div>
                 </div>
+
+                {page.auditadoEm && (
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-2 bg-white border rounded-md px-2 py-1.5 shadow-sm w-fit">
+                    <Clock className="size-3.5 text-muted-foreground shrink-0" />
+                    <span>
+                      Auditado em:{" "}
+                      {new Date(page.auditadoEm).toLocaleString("pt-PT")}
+                    </span>
+                  </div>
+                )}
               </div>
 
-              {/* Iframe preview */}
-              {page.processedHtml && (
-                <div className="space-y-2">
-                  {!showPreview ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="text-xs"
-                      onClick={() => setShowPreview(true)}
-                    >
-                      <Eye className="size-3 mr-1.5" />
-                      Abrir pré-visualização
-                    </Button>
-                  ) : (
-                    <Card className="shadow-sm overflow-hidden">
-                      <CardHeader className="border-b bg-muted/30 p-2.5 flex flex-row items-center justify-between">
-                        <div className="min-w-0">
-                          <p className="text-xs font-medium">
-                            Pré-visualização
-                          </p>
-                          <p className="text-xs text-muted-foreground truncate max-w-xs">
-                            {page.finalUrl}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-1 bg-background border rounded-md px-2 py-1 shrink-0">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-5 w-5"
-                            onClick={() =>
-                              setZoom((z) => Math.max(0.2, z - 0.1))
-                            }
-                            title="Reduzir zoom"
-                          >
-                            <ZoomOut className="size-2.5" />
-                          </Button>
-                          <span className="text-xs font-mono w-9 text-center">
-                            {Math.round(zoom * 100)}%
-                          </span>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-5 w-5"
-                            onClick={() =>
-                              setZoom((z) => Math.min(1.2, z + 0.1))
-                            }
-                            title="Aumentar zoom"
-                          >
-                            <ZoomIn className="size-2.5" />
-                          </Button>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="p-0 bg-gray-100 h-[500px] relative overflow-hidden">
-                        <div className="w-full h-full overflow-auto">
-                          <iframe
-                            ref={iframeRef}
-                            srcDoc={page.processedHtml}
-                            className="border-0 bg-white"
-                            style={{
-                              width: `${100 / zoom}%`,
-                              height: `${100 / zoom}%`,
-                              transform: `scale(${zoom})`,
-                              transformOrigin: "top left",
-                            }}
-                            sandbox="allow-scripts allow-popups allow-forms"
-                            title={`Preview ${page.url}`}
-                          />
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )}
-                </div>
-              )}
-            </>
+              {/* Right column (Iframe preview) */}
+              <div className="lg:col-span-7">
+                {page.processedHtml ? (
+                  <Card className="shadow-sm overflow-hidden">
+                    <CardHeader className="border-b bg-muted/30 p-2.5 flex flex-row items-center justify-between">
+                      <div className="min-w-0 flex-1 mr-2">
+                        <p className="text-xs font-medium">
+                          Pré-visualização
+                        </p>
+                        <p className="text-xs text-muted-foreground truncate" title={page.finalUrl}>
+                          {page.finalUrl}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 bg-background border rounded-md px-2 py-1 shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-5 w-5"
+                          onClick={() =>
+                            setZoom((z) => Math.max(0.2, z - 0.1))
+                          }
+                          title="Reduzir zoom"
+                        >
+                          <ZoomOut className="size-2.5" />
+                        </Button>
+                        <span className="text-xs font-mono w-9 text-center">
+                          {Math.round(zoom * 100)}%
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-5 w-5"
+                          onClick={() =>
+                            setZoom((z) => Math.min(1.2, z + 0.1))
+                          }
+                          title="Aumentar zoom"
+                        >
+                          <ZoomIn className="size-2.5" />
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="p-0 bg-gray-100 h-[500px] relative overflow-hidden">
+                      <div className="w-full h-full overflow-auto">
+                        <iframe
+                          ref={iframeRef}
+                          srcDoc={page.processedHtml}
+                          className="border-0 bg-white"
+                          style={{
+                            width: `${100 / zoom}%`,
+                            height: `${100 / zoom}%`,
+                            transform: `scale(${zoom})`,
+                            transformOrigin: "top left",
+                          }}
+                          sandbox="allow-scripts allow-popups allow-forms"
+                          title={`Preview ${page.url}`}
+                        />
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="border rounded-lg bg-muted/20 p-8 text-center text-xs text-muted-foreground h-[500px] flex items-center justify-center">
+                    Sem pré-visualização disponível
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
       </CollapsibleContent>
@@ -907,6 +910,36 @@ function SitemapAudit() {
       {/* Results */}
       {!loading && result && result.status === "completed" && (
         <div className="space-y-4">
+          {/* Timing details */}
+          {(result.iniciadoEm || result.duracaoFormatada) && (
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2 bg-slate-50 border rounded-lg text-xs text-slate-500">
+              {result.iniciadoEm && (
+                <div className="flex items-center gap-1.5">
+                  <Clock className="size-3.5 text-slate-400" />
+                  <span>
+                    <strong>Início:</strong> {new Date(result.iniciadoEm).toLocaleString("pt-PT")}
+                  </span>
+                </div>
+              )}
+              {result.finalizadoEm && (
+                <div className="flex items-center gap-1.5">
+                  <Clock className="size-3.5 text-slate-400" />
+                  <span>
+                    <strong>Fim:</strong> {new Date(result.finalizadoEm).toLocaleString("pt-PT")}
+                  </span>
+                </div>
+              )}
+              {result.duracaoFormatada && (
+                <div className="flex items-center gap-1.5">
+                  <Clock className="size-3.5 text-primary" />
+                  <span>
+                    <strong>Tempo decorrido:</strong> {result.duracaoFormatada}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Summary */}
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
             <div className="border rounded-lg p-3 text-center bg-white shadow-sm">
@@ -1213,6 +1246,36 @@ function CrawlerAudit() {
       {/* Results */}
       {!loading && result && result.status === "completed" && (
         <div className="space-y-4">
+          {/* Timing details */}
+          {(result.iniciadoEm || result.duracaoFormatada) && (
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2 bg-slate-50 border rounded-lg text-xs text-slate-500">
+              {result.iniciadoEm && (
+                <div className="flex items-center gap-1.5">
+                  <Clock className="size-3.5 text-slate-400" />
+                  <span>
+                    <strong>Início:</strong> {new Date(result.iniciadoEm).toLocaleString("pt-PT")}
+                  </span>
+                </div>
+              )}
+              {result.finalizadoEm && (
+                <div className="flex items-center gap-1.5">
+                  <Clock className="size-3.5 text-slate-400" />
+                  <span>
+                    <strong>Fim:</strong> {new Date(result.finalizadoEm).toLocaleString("pt-PT")}
+                  </span>
+                </div>
+              )}
+              {result.duracaoFormatada && (
+                <div className="flex items-center gap-1.5">
+                  <Clock className="size-3.5 text-primary" />
+                  <span>
+                    <strong>Tempo decorrido:</strong> {result.duracaoFormatada}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Summary */}
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
             <div className="border rounded-lg p-3 text-center bg-white shadow-sm">
@@ -1459,6 +1522,36 @@ function MultiUrlPaginationAudit() {
 
       {!loading && result && (
         <div className="space-y-4">
+          {/* Timing details */}
+          {(result.iniciadoEm || result.duracaoFormatada) && (
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2 bg-slate-50 border rounded-lg text-xs text-slate-500">
+              {result.iniciadoEm && (
+                <div className="flex items-center gap-1.5">
+                  <Clock className="size-3.5 text-slate-400" />
+                  <span>
+                    <strong>Início:</strong> {new Date(result.iniciadoEm).toLocaleString("pt-PT")}
+                  </span>
+                </div>
+              )}
+              {result.finalizadoEm && (
+                <div className="flex items-center gap-1.5">
+                  <Clock className="size-3.5 text-slate-400" />
+                  <span>
+                    <strong>Fim:</strong> {new Date(result.finalizadoEm).toLocaleString("pt-PT")}
+                  </span>
+                </div>
+              )}
+              {result.duracaoFormatada && (
+                <div className="flex items-center gap-1.5">
+                  <Clock className="size-3.5 text-primary" />
+                  <span>
+                    <strong>Tempo decorrido:</strong> {result.duracaoFormatada}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
             <div className="border rounded-lg p-3 text-center bg-white shadow-sm">
               <p className="text-xs text-muted-foreground mb-1">

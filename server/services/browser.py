@@ -1,3 +1,4 @@
+import os
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -51,10 +52,10 @@ class BrowserManager:
     def __init__(self, max_tabs: int = 5) -> None:
         self._playwright = None
         self._browser = None
+        self._context = None
         self._lock = asyncio.Lock()
         self._sem_tabs = asyncio.Semaphore(max_tabs)
         self._is_open = False
-        self._context_page_pools = {}
 
     async def start(self) -> None:
         if self._is_open:
@@ -77,10 +78,17 @@ class BrowserManager:
                 "--no-first-run",
             ]
 
+            headless_mode = os.getenv("PLAYWRIGHT_HEADLESS", "True").lower() == "true"
             self._browser = await self._playwright.chromium.launch(
-                headless=False,
+                headless=headless_mode,
                 args=args
             )
+            self._context = await self._browser.new_context(
+                user_agent=USER_AGENT,
+                locale="pt-PT",
+                viewport={"width": 1280, "height": 720},
+            )
+            await self._context.route("**/*", self._block_resources_custom)
             self._is_open = True
             logger.info("Playwright Chromium started.")
 
@@ -90,11 +98,15 @@ class BrowserManager:
                 return
             logger.info("Closing Playwright Chromium...")
             try:
-                if self._browser:
-                    await self._browser.close()
+                if self._context:
+                    await self._context.close()
             finally:
-                if self._playwright:
-                    await self._playwright.stop()
+                try:
+                    if self._browser:
+                        await self._browser.close()
+                finally:
+                    if self._playwright:
+                        await self._playwright.stop()
             self._is_open = False
             logger.info("Playwright Chromium closed.")
 
@@ -121,56 +133,31 @@ class BrowserManager:
             except:
                 pass
 
+    async def _safe_close_page(self, page):
+        """Close a page with a timeout to prevent hanging."""
+        try:
+            if page.is_closed:
+                return
+            await asyncio.wait_for(page.close(), timeout=3.0)
+        except asyncio.TimeoutError:
+            logger.warning("Page close timed out, force-closing...")
+            try:
+                await page.close()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     @asynccontextmanager
     async def session_context(self, seed_url: str = None):
         await self.start()
-        context = await self._browser.new_context(
-            user_agent=USER_AGENT,
-            locale="pt-PT",
-            viewport={"width": 1280, "height": 720},
-        )
-
-        await context.route("**/*", self._block_resources_custom)
-
-        try:
-            yield context
-        finally:
-            for page in list(context.pages):
-                try:
-                    if not page.is_closed:
-                        await page.close()
-                except Exception:
-                    pass
-            try:
-                await context.close()
-            except Exception:
-                pass
+        yield self._context
 
     @asynccontextmanager
-    async def page_in_context(self, context):
-        async with self._sem_tabs:
-            page = await context.new_page()
-            try:
-                yield page
-            finally:
-                try:
-                    if not page.is_closed:
-                        await page.close()
-                except Exception:
-                    pass
-
-    @asynccontextmanager
-    async def page(self):
+    async def page_in_context(self, context=None):
         await self.start()
         async with self._sem_tabs:
-            context = await self._browser.new_context(
-                user_agent=USER_AGENT,
-                locale="pt-PT",
-                viewport={"width": 1280, "height": 720},
-            )
-
-            await context.route("**/*", self._block_resources_custom)
-            page = await context.new_page()
+            page = await self._context.new_page()
             try:
                 yield page
             finally:
@@ -178,12 +165,22 @@ class BrowserManager:
                     await page.close()
                 except Exception:
                     pass
+
+    @asynccontextmanager
+    async def page(self):
+        await self.start()
+        async with self._sem_tabs:
+            page = await self._context.new_page()
+            try:
+                yield page
+            finally:
                 try:
-                    await context.close()
+                    await page.close()
                 except Exception:
                     pass
 
-browser_manager = BrowserManager(max_tabs=5)
+PLAYWRIGHT_MAX_TABS = int(os.getenv("PLAYWRIGHT_MAX_TABS", "10"))
+browser_manager = BrowserManager(max_tabs=PLAYWRIGHT_MAX_TABS)
 
 
 async def scroll_down_page(page) -> None:

@@ -42,6 +42,7 @@ export interface SitemapPageResult {
   hasFailures: boolean;
   processedHtml?: string | null;
   error?: string;
+  auditadoEm?: string;
 }
 
 export interface SitemapAuditResult {
@@ -55,6 +56,10 @@ export interface SitemapAuditResult {
   pagesWithWarnings?: number;
   pages: SitemapPageResult[];
   daCache?: boolean;
+  iniciadoEm?: string;
+  finalizadoEm?: string;
+  duracao?: number;
+  duracaoFormatada?: string;
 }
 
 export interface CrawlerAuditResult {
@@ -67,6 +72,10 @@ export interface CrawlerAuditResult {
   pagesWithWarnings?: number;
   pages: SitemapPageResult[];
   daCache?: boolean;
+  iniciadoEm?: string;
+  finalizadoEm?: string;
+  duracao?: number;
+  duracaoFormatada?: string;
 }
 
 export interface MultiUrlAuditGroup {
@@ -88,6 +97,10 @@ export interface MultiUrlAuditResult {
   pagesWithWarnings?: number;
   groups: MultiUrlAuditGroup[];
   daCache?: boolean;
+  iniciadoEm?: string;
+  finalizadoEm?: string;
+  duracao?: number;
+  duracaoFormatada?: string;
 }
 
 export interface HealthStatus {

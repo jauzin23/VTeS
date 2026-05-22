@@ -1,10 +1,9 @@
+# Stage 1: Build the client
 FROM node:20-alpine AS builder
 WORKDIR /app
 
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-ARG NEXT_PUBLIC_API_KEY
-ENV NEXT_PUBLIC_API_KEY=$NEXT_PUBLIC_API_KEY
 
 COPY package.json package-lock.json* ./
 RUN npm ci --legacy-peer-deps
@@ -12,17 +11,9 @@ RUN npm ci --legacy-peer-deps
 COPY . .
 RUN npm run build
 
-FROM node:20-alpine AS runner
-WORKDIR /app
-
-ENV NODE_ENV=production
-ENV PORT=3000
-ENV HOSTNAME=0.0.0.0
-
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
-
-EXPOSE 3000
-
-CMD ["node", "server.js"]
+# Stage 2: Serve the client
+FROM nginx:alpine AS runner
+COPY --from=builder /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]

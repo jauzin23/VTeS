@@ -10,7 +10,8 @@ from .discover import (
     JS_DETETAR_PAGINACAO,
     parse_page_param,
     extract_next_data,
-    traverse_pagination_keys
+    traverse_pagination_keys,
+    audit_and_cache_page
 )
 from .crawler import crawl_page
 from .browser import browser_manager, scroll_down_page
@@ -245,7 +246,8 @@ async def extract_links_with_playwright(
     active_pages: list,
     pages_lock: asyncio.Lock,
     stop_event: asyncio.Event,
-    context=None
+    context=None,
+    audit_cache: dict = None
 ) -> list[str]:
     links = []
     if stop_event.is_set():
@@ -257,14 +259,15 @@ async def extract_links_with_playwright(
                 active_pages.append(page)
             try:
                 try:
-                    await page.goto(url, wait_until="domcontentloaded", timeout=10000)
-                    await asyncio.sleep(1.5)  # Wait for SPA hydration
+                    await page.goto(url, wait_until="load", timeout=15000)
+                    await asyncio.sleep(2.0)  # Wait for SPA hydration
                 except Exception as e:
                     if stop_event.is_set():
                         return links
-                    logger.warning(f"Playwright navigation timed out or failed on domcontentloaded for {url}: {e}. Retrying with commit...")
+                    logger.warning(f"Playwright navigation timed out or failed on load for {url}: {e}. Retrying with domcontentloaded...")
                     try:
-                        await page.goto(url, wait_until="commit", timeout=5000)
+                        await page.goto(url, wait_until="domcontentloaded", timeout=8000)
+                        await asyncio.sleep(2.0)
                     except Exception as e2:
                         if stop_event.is_set():
                             return links
@@ -273,14 +276,22 @@ async def extract_links_with_playwright(
                 if stop_event.is_set():
                     return links
 
-                # Accept cookies
-                try:
-                    await page.evaluate(JS_COOKIE_ACCEPT)
-                except Exception:
-                    pass
+                # Accept cookies (try multiple times to catch delayed banners)
+                for _ in range(3):
+                    try:
+                        await page.evaluate(JS_COOKIE_ACCEPT)
+                    except Exception:
+                        pass
+                    await asyncio.sleep(0.8)
 
                 if stop_event.is_set():
                     return links
+
+                # Wait for generic content elements to verify the loader is gone
+                try:
+                    await page.wait_for_selector('a[href], article, main, h1, h2', timeout=5000)
+                except Exception:
+                    pass
 
                 # Full scroll down to ensure dynamic content / lazy loaded links are rendered
                 await scroll_down_page(page)
@@ -303,6 +314,8 @@ async def extract_links_with_playwright(
                 try:
                     html = await page.content()
                     next_data = extract_next_data(html)
+                    if html and audit_cache is not None:
+                        await audit_and_cache_page(page, url, html, audit_cache)
                 except Exception:
                     next_data = None
 
@@ -370,7 +383,8 @@ async def crawl_worker(
     stop_event: asyncio.Event,
     active_pages: list,
     active_pages_lock: asyncio.Lock,
-    context=None
+    context=None,
+    audit_cache: dict = None
 ):
     while not stop_event.is_set():
         try:
@@ -392,7 +406,14 @@ async def crawl_worker(
         
         try:
             logger.info(f"Crawling {current_url} via Playwright")
-            raw_links = await extract_links_with_playwright(current_url, active_pages, active_pages_lock, stop_event, context=context)
+            raw_links = await extract_links_with_playwright(
+                current_url,
+                active_pages,
+                active_pages_lock,
+                stop_event,
+                context=context,
+                audit_cache=audit_cache
+            )
 
             # Filter and normalize links
             filtered_links = filter_and_normalize_links(raw_links, target_host)
@@ -409,7 +430,7 @@ async def crawl_worker(
         finally:
             queue.task_done()
 
-async def discover_all_links_concurrent(seed_url: str, max_pages: int = 100, concurrency: int = 5, context=None) -> list[str]:
+async def discover_all_links_concurrent(seed_url: str, max_pages: int = 100, concurrency: int = 5, context=None, audit_cache: dict = None) -> list[str]:
     seed_url = normalize_crawler_url(seed_url)
     if not is_valid_url(seed_url):
         return []
@@ -456,7 +477,8 @@ async def discover_all_links_concurrent(seed_url: str, max_pages: int = 100, con
                     stop_event,
                     active_pages,
                     active_pages_lock,
-                    context=context
+                    context=context,
+                    audit_cache=audit_cache
                 )
             )
             workers.append(worker)
@@ -498,38 +520,64 @@ async def run_crawler_audit(raw_input: str, max_pages: int = 100) -> dict:
     """
     Crawls website links recursively and audits headings on each discovered page.
     """
+    from datetime import datetime
+    import time
+    
+    start_time = time.time()
+    iniciado_em = datetime.utcnow().isoformat() + "Z"
+
     base_url = normalize_crawler_url(raw_input)
     if not is_valid_url(base_url):
+        finalized_at = datetime.utcnow().isoformat() + "Z"
+        duracao = time.time() - start_time
         return {
             "baseUrl": raw_input,
             "status": "error",
             "message": "URL inválido",
             "pages": [],
             "totalPages": 0,
+            "iniciadoEm": iniciado_em,
+            "finalizadoEm": finalized_at,
+            "duracao": duracao,
+            "duracaoFormatada": format_duration(duracao),
         }
 
     logger.info(f"Starting crawler link discovery for: {base_url} (limit: {max_pages})")
 
+    audit_cache = {}
+
     async with browser_manager.session_context(seed_url=base_url) as context:
         try:
-            discovered_urls = await discover_all_links_concurrent(base_url, max_pages=max_pages, context=context)
+            discovered_urls = await discover_all_links_concurrent(base_url, max_pages=max_pages, context=context, audit_cache=audit_cache)
         except Exception as e:
             logger.exception("Failed link discovery in crawler")
+            finalized_at = datetime.utcnow().isoformat() + "Z"
+            duracao = time.time() - start_time
             return {
                 "baseUrl": base_url,
                 "status": "error",
                 "message": f"Erro na descoberta de links: {str(e)}",
                 "pages": [],
                 "totalPages": 0,
+                "iniciadoEm": iniciado_em,
+                "finalizadoEm": finalized_at,
+                "duracao": duracao,
+                "duracaoFormatada": format_duration(duracao),
             }
 
         if not discovered_urls:
+            finalized_at = datetime.utcnow().isoformat() + "Z"
+            duracao = time.time() - start_time
             return {
                 "baseUrl": base_url,
                 "status": "error",
                 "message": "Nenhum link encontrado para rastrear.",
                 "pages": [],
                 "totalPages": 0,
+                "iniciadoEm": iniciado_em,
+                "finalizadoEm": finalized_at,
+                "duracao": duracao,
+                "duracaoFormatada": format_duration(duracao),
             }
 
         logger.info(f"Crawler found {len(discovered_urls)} URLs. Running browser audits...")
@@ -543,7 +591,7 @@ async def run_crawler_audit(raw_input: str, max_pages: int = 100) -> dict:
             async with audit_sem:
                 try:
                     logger.info(f"Auditing page: {url}")
-                    crawl = await crawl_page(url, context=context)
+                    crawl = await crawl_page(url, context=context, audit_cache=audit_cache)
                     processed_html = inject_iframe_script(
                         crawl.get("renderedHtml", ""),
                         crawl["finalUrl"]
@@ -558,6 +606,7 @@ async def run_crawler_audit(raw_input: str, max_pages: int = 100) -> dict:
                             "issueCount": len(crawl["result"]["issues"]),
                             "hasFailures": any(i["severity"] == "FAIL" for i in crawl["result"]["issues"]),
                             "processedHtml": processed_html,
+                            "auditadoEm": crawl.get("auditadoEm") or datetime.utcnow().isoformat() + "Z",
                         })
                 except Exception as e:
                     logger.warning(f"Audit failed for {url}: {e}")
@@ -572,6 +621,7 @@ async def run_crawler_audit(raw_input: str, max_pages: int = 100) -> dict:
                             "hasFailures": False,
                             "processedHtml": None,
                             "error": str(e),
+                            "auditadoEm": datetime.utcnow().isoformat() + "Z",
                         })
 
         await asyncio.gather(
@@ -586,6 +636,9 @@ async def run_crawler_audit(raw_input: str, max_pages: int = 100) -> dict:
     pages_with_failures = sum(1 for r in results if r.get("status") == "ERROR" or r.get("hasFailures"))
     pages_with_warnings = sum(1 for r in results if r.get("status") != "ERROR" and not r.get("hasFailures") and any(i["severity"] == "REVIEW" for i in r.get("issues", [])))
 
+    finalized_at = datetime.utcnow().isoformat() + "Z"
+    duracao = time.time() - start_time
+
     return {
         "baseUrl": base_url,
         "status": "completed",
@@ -594,4 +647,21 @@ async def run_crawler_audit(raw_input: str, max_pages: int = 100) -> dict:
         "pagesWithFailures": pages_with_failures,
         "pagesWithWarnings": pages_with_warnings,
         "pages": results,
+        "iniciadoEm": iniciado_em,
+        "finalizadoEm": finalized_at,
+        "duracao": duracao,
+        "duracaoFormatada": format_duration(duracao),
     }
+
+
+def format_duration(seconds: float) -> str:
+    total_seconds = int(round(seconds))
+    if total_seconds < 60:
+        return f"{total_seconds}s"
+    minutes = total_seconds // 60
+    secs = total_seconds % 60
+    if minutes < 60:
+        return f"{minutes}m {secs}s"
+    hours = minutes // 60
+    mins = minutes % 60
+    return f"{hours}h {mins}m {secs}s"

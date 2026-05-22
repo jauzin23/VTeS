@@ -143,6 +143,12 @@ async def run_sitemap_audit(raw_input: str) -> dict:
     4. Audit headings on each discovered page
     5. Return structured results
     """
+    from datetime import datetime
+    import time
+    
+    start_time = time.time()
+    iniciado_em = datetime.utcnow().isoformat() + "Z"
+
     base_url = normalize_base_url(raw_input)
     logger.info(f"Starting sitemap audit for: {base_url}")
 
@@ -150,6 +156,8 @@ async def run_sitemap_audit(raw_input: str) -> dict:
     sitemap_urls = await fetch_sitemap_urls(base_url)
 
     if not sitemap_urls:
+        finalized_at = datetime.utcnow().isoformat() + "Z"
+        duracao = time.time() - start_time
         return {
             "baseUrl": base_url,
             "sitemapUrl": base_url + "/sitemap.xml",
@@ -157,12 +165,17 @@ async def run_sitemap_audit(raw_input: str) -> dict:
             "message": "Não foi possível obter URLs do sitemap.xml",
             "pages": [],
             "totalPages": 0,
+            "iniciadoEm": iniciado_em,
+            "finalizadoEm": finalized_at,
+            "duracao": duracao,
+            "duracaoFormatada": format_duration(duracao),
         }
 
     logger.info(f"Processing {len(sitemap_urls)} URLs from sitemap")
 
     # Step 2: For each sitemap URL, discover paginated sub-pages and audit headings inside a session context
     results = []
+    audit_cache = {}
 
     async with browser_manager.session_context(seed_url=base_url) as context:
         all_pages_to_audit = set()
@@ -170,7 +183,7 @@ async def run_sitemap_audit(raw_input: str) -> dict:
         async def discover_for_url(url: str):
             """Discover paginated sub-pages for a given sitemap URL."""
             try:
-                sub_pages = await discover_urls(url, context=context)
+                sub_pages = await discover_urls(url, context=context, audit_cache=audit_cache)
                 if sub_pages:
                     for p in sub_pages:
                         all_pages_to_audit.add(normalize_url(p))
@@ -202,7 +215,7 @@ async def run_sitemap_audit(raw_input: str) -> dict:
             async with audit_sem:
                 try:
                     logger.info(f"Auditing: {url}")
-                    crawl = await crawl_page(url, context=context)
+                    crawl = await crawl_page(url, context=context, audit_cache=audit_cache)
                     processed_html = inject_iframe_script(
                         crawl.get("renderedHtml", ""),
                         crawl["finalUrl"]
@@ -217,6 +230,7 @@ async def run_sitemap_audit(raw_input: str) -> dict:
                             "issueCount": len(crawl["result"]["issues"]),
                             "hasFailures": any(i["severity"] == "FAIL" for i in crawl["result"]["issues"]),
                             "processedHtml": processed_html,
+                            "auditadoEm": crawl.get("auditadoEm") or datetime.utcnow().isoformat() + "Z",
                         })
                 except Exception as e:
                     logger.warning(f"Audit failed for {url}: {e}")
@@ -231,6 +245,7 @@ async def run_sitemap_audit(raw_input: str) -> dict:
                             "hasFailures": False,
                             "processedHtml": None,
                             "error": str(e),
+                            "auditadoEm": datetime.utcnow().isoformat() + "Z",
                         })
 
         await asyncio.gather(
@@ -245,6 +260,9 @@ async def run_sitemap_audit(raw_input: str) -> dict:
     pages_with_failures = sum(1 for r in results if r.get("status") == "ERROR" or r.get("hasFailures"))
     pages_with_warnings = sum(1 for r in results if r.get("status") != "ERROR" and not r.get("hasFailures") and any(i["severity"] == "REVIEW" for i in r.get("issues", [])))
 
+    finalized_at = datetime.utcnow().isoformat() + "Z"
+    duracao = time.time() - start_time
+
     return {
         "baseUrl": base_url,
         "sitemapUrl": base_url + "/sitemap.xml",
@@ -254,4 +272,21 @@ async def run_sitemap_audit(raw_input: str) -> dict:
         "pagesWithFailures": pages_with_failures,
         "pagesWithWarnings": pages_with_warnings,
         "pages": results,
+        "iniciadoEm": iniciado_em,
+        "finalizadoEm": finalized_at,
+        "duracao": duracao,
+        "duracaoFormatada": format_duration(duracao),
     }
+
+
+def format_duration(seconds: float) -> str:
+    total_seconds = int(round(seconds))
+    if total_seconds < 60:
+        return f"{total_seconds}s"
+    minutes = total_seconds // 60
+    secs = total_seconds % 60
+    if minutes < 60:
+        return f"{minutes}m {secs}s"
+    hours = minutes // 60
+    mins = minutes % 60
+    return f"{hours}h {mins}m {secs}s"

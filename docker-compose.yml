@@ -1,0 +1,27 @@
+services:
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - PLAYWRIGHT_HEADLESS=True
+      - PLAYWRIGHT_MAX_TABS=10
+      - CACHE_MAX_SIZE=200
+      - CACHE_TTL_SECONDS=600
+      - AUDIT_CONCURRENCY=3
+      - AUDIT_MAX_QUEUE=20
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://localhost:3001
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

@@ -102,8 +102,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-cache = SimpleCache(max_size=200, ttl_seconds=600)
-queue = AuditQueue(concurrency=3, max_queue=20)
+CACHE_MAX_SIZE = int(os.getenv("CACHE_MAX_SIZE", "200"))
+CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "600"))
+AUDIT_CONCURRENCY = int(os.getenv("AUDIT_CONCURRENCY", "3"))
+AUDIT_MAX_QUEUE = int(os.getenv("AUDIT_MAX_QUEUE", "20"))
+
+cache = SimpleCache(max_size=CACHE_MAX_SIZE, ttl_seconds=CACHE_TTL_SECONDS)
+queue = AuditQueue(concurrency=AUDIT_CONCURRENCY, max_queue=AUDIT_MAX_QUEUE)
 
 
 class DiscoverRequest(BaseModel):
@@ -270,21 +275,4 @@ async def api_health():
     }
 
 
-# SPA Fallback
-DIST_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../client/dist"))
-
-
-@app.get("/{path:path}")
-async def spa_fallback(path: str):
-    if path.startswith("api/"):
-        return JSONResponse(status_code=404, content={"error": "Not Found"})
-
-    file_path = os.path.join(DIST_PATH, path)
-    if os.path.isfile(file_path):
-        return FileResponse(file_path)
-
-    index_file = os.path.join(DIST_PATH, "index.html")
-    if os.path.isfile(index_file):
-        return FileResponse(index_file)
-
-    return JSONResponse(status_code=404, content={"error": "Frontend not built yet"})
+# The SPA Fallback has been removed. Frontend is served independently on its own port.

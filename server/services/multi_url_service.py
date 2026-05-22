@@ -13,6 +13,12 @@ DISCOVERY_CONCURRENCY = 4
 
 
 async def run_multi_url_audit(raw_urls: list[str]) -> dict:
+    from datetime import datetime
+    import time
+
+    start_time = time.time()
+    iniciado_em = datetime.utcnow().isoformat() + "Z"
+
     normalized_inputs = []
     seen_inputs = set()
 
@@ -26,16 +32,34 @@ async def run_multi_url_audit(raw_urls: list[str]) -> dict:
         seen_inputs.add(normalized)
         normalized_inputs.append(normalized)
 
+    if not normalized_inputs:
+        finalized_at = datetime.utcnow().isoformat() + "Z"
+        duracao = time.time() - start_time
+        return {
+            "status": "completed",
+            "totalInputUrls": 0,
+            "totalPages": 0,
+            "totalIssues": 0,
+            "pagesWithFailures": 0,
+            "pagesWithWarnings": 0,
+            "groups": [],
+            "iniciadoEm": iniciado_em,
+            "finalizadoEm": finalized_at,
+            "duracao": duracao,
+            "duracaoFormatada": format_duration(duracao),
+        }
+
     groups_map: dict[str, dict] = {}
     all_pages_to_audit: set[str] = set()
     page_to_group: dict[str, str] = {}
+    audit_cache = {}
 
     seed_url = normalized_inputs[0] if normalized_inputs else None
 
     async with browser_manager.session_context(seed_url=seed_url) as context:
         async def discover_for_url(input_url: str):
             try:
-                listing_pages = await discover_paginated_pages(input_url, context=context)
+                listing_pages = await discover_paginated_pages(input_url, context=context, audit_cache=audit_cache)
             except Exception as e:
                 logger.warning(f"Discovery failed for {input_url}: {e}")
                 listing_pages = [input_url]
@@ -52,7 +76,7 @@ async def run_multi_url_audit(raw_urls: list[str]) -> dict:
 
             if has_pagination:
                 try:
-                    detail_pages = await discover_urls(input_url, context=context)
+                    detail_pages = await discover_urls(input_url, context=context, audit_cache=audit_cache)
                 except Exception as e:
                     logger.warning(f"Detail discovery failed for {input_url}: {e}")
                     detail_pages = []
@@ -89,7 +113,7 @@ async def run_multi_url_audit(raw_urls: list[str]) -> dict:
         async def audit_page(url: str):
             async with audit_sem:
                 try:
-                    crawl = await crawl_page(url, context=context)
+                    crawl = await crawl_page(url, context=context, audit_cache=audit_cache)
                     processed_html = inject_iframe_script(
                         crawl.get("renderedHtml", ""),
                         crawl["finalUrl"],
@@ -105,6 +129,7 @@ async def run_multi_url_audit(raw_urls: list[str]) -> dict:
                             i["severity"] == "FAIL" for i in crawl["result"]["issues"]
                         ),
                         "processedHtml": processed_html,
+                        "auditadoEm": crawl.get("auditadoEm") or datetime.utcnow().isoformat() + "Z",
                     }
                 except Exception as e:
                     logger.warning(f"Audit failed for {url}: {e}")
@@ -118,6 +143,7 @@ async def run_multi_url_audit(raw_urls: list[str]) -> dict:
                         "hasFailures": False,
                         "processedHtml": None,
                         "error": str(e),
+                        "auditadoEm": datetime.utcnow().isoformat() + "Z",
                     }
 
         await asyncio.gather(
@@ -160,6 +186,9 @@ async def run_multi_url_audit(raw_urls: list[str]) -> dict:
             "pages": page_results,
         })
 
+    finalized_at = datetime.utcnow().isoformat() + "Z"
+    duracao = time.time() - start_time
+
     return {
         "status": "completed",
         "totalInputUrls": len(normalized_inputs),
@@ -168,4 +197,21 @@ async def run_multi_url_audit(raw_urls: list[str]) -> dict:
         "pagesWithFailures": pages_with_failures,
         "pagesWithWarnings": pages_with_warnings,
         "groups": groups,
+        "iniciadoEm": iniciado_em,
+        "finalizadoEm": finalized_at,
+        "duracao": duracao,
+        "duracaoFormatada": format_duration(duracao),
     }
+
+
+def format_duration(seconds: float) -> str:
+    total_seconds = int(round(seconds))
+    if total_seconds < 60:
+        return f"{total_seconds}s"
+    minutes = total_seconds // 60
+    secs = total_seconds % 60
+    if minutes < 60:
+        return f"{minutes}m {secs}s"
+    hours = minutes // 60
+    mins = minutes % 60
+    return f"{hours}h {mins}m {secs}s"
