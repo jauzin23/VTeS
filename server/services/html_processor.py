@@ -153,11 +153,14 @@ def inject_iframe_script(html: str, final_url: str) -> str:
     # ── 2. Absolutize relative asset URLs (regex, no DOM parse) ─────────────
 
     html = _fix_tag_attr(html, 'link',   'href',   final_url)
-    html = _fix_tag_attr(html, 'script', 'src',    final_url)
     html = _fix_tag_attr(html, 'img',    'src',    final_url)
     html = _fix_tag_attr(html, 'source', 'src',    final_url)
     html = _fix_tag_attr(html, 'video',  'src',    final_url)
     html = _fix_tag_attr(html, 'audio',  'src',    final_url)
+
+    # Disable all original scripts to prevent React/Next.js hydration errors
+    html = re.sub(r'<script\b', '<template', html, flags=re.IGNORECASE)
+    html = re.sub(r'</script\s*>', '</template>', html, flags=re.IGNORECASE)
 
     # ── 3. Inject interactive postMessage script before </body> ──────────────
 

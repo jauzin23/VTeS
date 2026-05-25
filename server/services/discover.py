@@ -10,17 +10,19 @@ import httpx
 logger = logging.getLogger("h_audit.discover")
 
 DETAIL_PATH_IGNORES = re.compile(
-    r"\/(sobre|contacto|contactos|login|registo|termos|privacidade|privacy|cookies|pesquisa|search|account|perfil|checkout|cart|carrinho)(\/|$)",
+    r"\/(sobre|contacto|contactos|login|registo|termos|privacidade|privacy|cookies|pesquisa|search|account|perfil|checkout|cart|carrinho|mapadosite)(\/|$)",
     re.I
 )
 
 PAGE_PARAM_CANDIDATES = ["page", "pagina", "pg", "p", "offset", "inicio"]
-MAX_PAGES_TO_FOLLOW = 20
+# Pagination limits completely removed as requested
 
 def normalize_url(url_str: str) -> str:
     try:
         p = urlparse(url_str)
         path = p.path
+        while len(path) > 1 and path[-1] in (':', '.', ',', ';'):
+            path = path[:-1]
         if len(path) > 1 and path.endswith("/"):
             path = path[:-1]
         elif path == "/":
@@ -340,7 +342,7 @@ async def discover_paginated_pages(start_url: str, context=None, audit_cache: di
                 current_next = next_href
                 hops = 0
 
-                while current_next and hops < MAX_PAGES_TO_FOLLOW - 1:
+                while current_next:
                     normalized_next = normalize_url(current_next)
                     if normalized_next in discovered_set:
                         break
@@ -392,14 +394,14 @@ async () => {
                 sameCount = 0;
             }
             lastCount = currentCount;
-            if (sameCount >= 6 || (currentCount > 30 && sameCount >= 3)) {
+            if (sameCount >= 8 || (currentCount > 30 && sameCount >= 6)) {
                 resolve(true);
             } else {
                 setTimeout(check, 400);
             }
         };
         check();
-        setTimeout(() => resolve(false), 8000);
+        setTimeout(() => resolve(false), 12000);
     });
 }
 """
@@ -556,9 +558,25 @@ JS_EXTRACT_DETAIL_LINKS = r"""
         return /\b(page|pagina|página|anterior|prev|previous|next|seguinte|próxima|proxima)\b/i.test(label);
     };
 
-    const shouldIgnore = (href, label = "") => {
+    const shouldIgnore = (href, label = "", el = null) => {
         if (!href || /^javascript:/i.test(href) || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:')) return true;
         if (isPaginationLabel(label)) return true;
+        
+        if (el && (
+            el.closest("nav") || 
+            el.closest("header") || 
+            el.closest("footer") ||
+            el.closest("#header") ||
+            el.closest("#footer") ||
+            el.closest(".header") ||
+            el.closest(".footer") ||
+            el.closest("[id*='menu']") ||
+            el.closest("[class*='menu']") ||
+            el.closest("[class*='nav']")
+        )) {
+            return true;
+        }
+
         try {
             const url = new URL(href, window.location.href);
             const start = new URL(startUrl);
@@ -580,12 +598,11 @@ JS_EXTRACT_DETAIL_LINKS = r"""
         const seen = new Set();
         selectors.forEach(sel => {
             document.querySelectorAll(sel).forEach(el => {
-                if (el.closest("nav") || el.closest("footer") || el.closest("header")) return;
                 const anchors = el.tagName.toLowerCase() === 'a' ? [el] : Array.from(el.querySelectorAll('a[href]'));
                 anchors.forEach(a => {
                     const href = a.href;
                     const label = ((a.innerText || a.textContent || "") + " " + (a.getAttribute("aria-label") || "")).trim();
-                    if (!shouldIgnore(href, label)) {
+                    if (!shouldIgnore(href, label, a)) {
                         try {
                             const normUrl = href.replace(/\/$/, "");
                             if (!seen.has(normUrl)) {
@@ -641,8 +658,7 @@ JS_EXTRACT_DETAIL_LINKS = r"""
         "main", '[role="main"]', "article", "section", ".content", '[class*="content"]',
         ".card", '[class*="card"]', '[class*="list"]', '[class*="grid"]', '[class*="item"]', "body"
     ].flatMap(sel => Array.from(document.querySelectorAll(sel)))
-     .filter((c, idx, self) => self.indexOf(c) === idx)
-     .filter(c => !c.closest("nav") && !c.closest("footer") && !c.closest("header"));
+     .filter((c, idx, self) => self.indexOf(c) === idx);
 
     const targets = containers.length ? containers : [document.body];
     const seen = new Set();
@@ -651,7 +667,7 @@ JS_EXTRACT_DETAIL_LINKS = r"""
         c.querySelectorAll('a[href]').forEach(a => {
             const href = a.href;
             const label = ((a.innerText || a.textContent || "") + " " + (a.getAttribute("aria-label") || "")).trim();
-            if (!shouldIgnore(href, label)) {
+            if (!shouldIgnore(href, label, a)) {
                 try {
                     const normUrl = href.replace(/\/$/, "");
                     if (!seen.has(normUrl)) {
@@ -784,8 +800,7 @@ async def discover_urls(start_url: str, context=None, audit_cache: dict = None) 
             # If pagination total is found, build page URLs
             pages_to_crawl = []
             if total_pages > 1:
-                limit = min(total_pages, MAX_PAGES_TO_FOLLOW)
-                for page_num in range(2, limit + 1):
+                for page_num in range(2, total_pages + 1):
                     pages_to_crawl.append(build_page_url(normalized_start_url, page_num, param_name))
             elif next_href:
                 # Let's start following sequentially up to max pages if no total count

@@ -26,3 +26,4 @@ Thumbs.db
 
 .agents/
 skills-lock.json
+tests/

@@ -557,9 +557,11 @@ function SitemapPageRow({
   const [zoom, setZoom] = useState(0.45);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const hasError = page.status === "ERROR";
-  
-  const failCount = page.issues?.filter((i) => i.severity === "FAIL").length ?? 0;
-  const reviewCount = page.issues?.filter((i) => i.severity === "REVIEW").length ?? 0;
+
+  const failCount =
+    page.issues?.filter((i) => i.severity === "FAIL").length ?? 0;
+  const reviewCount =
+    page.issues?.filter((i) => i.severity === "REVIEW").length ?? 0;
 
   const sendToIframe = useCallback((msg: object) => {
     iframeRef.current?.contentWindow?.postMessage(msg, "*");
@@ -652,9 +654,7 @@ function SitemapPageRow({
                     <IssueList
                       issues={page.issues}
                       onHighlight={
-                        page.processedHtml
-                          ? handleHighlightXPath
-                          : undefined
+                        page.processedHtml ? handleHighlightXPath : undefined
                       }
                     />
                   </div>
@@ -669,9 +669,7 @@ function SitemapPageRow({
                       headings={page.headings}
                       compact
                       onSelect={
-                        page.processedHtml
-                          ? handleSelectHeading
-                          : undefined
+                        page.processedHtml ? handleSelectHeading : undefined
                       }
                       selectedIndex={selectedHeading}
                     />
@@ -695,10 +693,11 @@ function SitemapPageRow({
                   <Card className="shadow-sm overflow-hidden">
                     <CardHeader className="border-b bg-muted/30 p-2.5 flex flex-row items-center justify-between">
                       <div className="min-w-0 flex-1 mr-2">
-                        <p className="text-xs font-medium">
-                          Pré-visualização
-                        </p>
-                        <p className="text-xs text-muted-foreground truncate" title={page.finalUrl}>
+                        <p className="text-xs font-medium">Pré-visualização</p>
+                        <p
+                          className="text-xs text-muted-foreground truncate"
+                          title={page.finalUrl}
+                        >
                           {page.finalUrl}
                         </p>
                       </div>
@@ -707,9 +706,7 @@ function SitemapPageRow({
                           variant="ghost"
                           size="icon"
                           className="h-5 w-5"
-                          onClick={() =>
-                            setZoom((z) => Math.max(0.2, z - 0.1))
-                          }
+                          onClick={() => setZoom((z) => Math.max(0.2, z - 0.1))}
                           title="Reduzir zoom"
                         >
                           <ZoomOut className="size-2.5" />
@@ -721,9 +718,7 @@ function SitemapPageRow({
                           variant="ghost"
                           size="icon"
                           className="h-5 w-5"
-                          onClick={() =>
-                            setZoom((z) => Math.min(1.2, z + 0.1))
-                          }
+                          onClick={() => setZoom((z) => Math.min(1.2, z + 0.1))}
                           title="Aumentar zoom"
                         >
                           <ZoomIn className="size-2.5" />
@@ -804,11 +799,15 @@ function SitemapAudit() {
 
   const filteredPages =
     result?.pages.filter((p) => {
-      const failCount = p.issues?.filter((i) => i.severity === "FAIL").length ?? 0;
-      const reviewCount = p.issues?.filter((i) => i.severity === "REVIEW").length ?? 0;
+      const failCount =
+        p.issues?.filter((i) => i.severity === "FAIL").length ?? 0;
+      const reviewCount =
+        p.issues?.filter((i) => i.severity === "REVIEW").length ?? 0;
       if (filter === "fail") return p.status === "ERROR" || failCount > 0;
-      if (filter === "warn") return p.status !== "ERROR" && failCount === 0 && reviewCount > 0;
-      if (filter === "ok") return p.status !== "ERROR" && failCount === 0 && reviewCount === 0;
+      if (filter === "warn")
+        return p.status !== "ERROR" && failCount === 0 && reviewCount > 0;
+      if (filter === "ok")
+        return p.status !== "ERROR" && failCount === 0 && reviewCount === 0;
       return true;
     }) ?? [];
 
@@ -917,7 +916,8 @@ function SitemapAudit() {
                 <div className="flex items-center gap-1.5">
                   <Clock className="size-3.5 text-slate-400" />
                   <span>
-                    <strong>Início:</strong> {new Date(result.iniciadoEm).toLocaleString("pt-PT")}
+                    <strong>Início:</strong>{" "}
+                    {new Date(result.iniciadoEm).toLocaleString("pt-PT")}
                   </span>
                 </div>
               )}
@@ -925,7 +925,8 @@ function SitemapAudit() {
                 <div className="flex items-center gap-1.5">
                   <Clock className="size-3.5 text-slate-400" />
                   <span>
-                    <strong>Fim:</strong> {new Date(result.finalizadoEm).toLocaleString("pt-PT")}
+                    <strong>Fim:</strong>{" "}
+                    {new Date(result.finalizadoEm).toLocaleString("pt-PT")}
                   </span>
                 </div>
               )}
@@ -1012,7 +1013,9 @@ function SitemapAudit() {
                   </p>
                   <p
                     className={`text-2xl font-bold ${
-                      compliantPages > 0 ? "text-emerald-600" : "text-foreground"
+                      compliantPages > 0
+                        ? "text-emerald-600"
+                        : "text-foreground"
                     }`}
                   >
                     {compliantPages}
@@ -1120,11 +1123,15 @@ function CrawlerAudit() {
 
   const filteredPages =
     result?.pages.filter((p) => {
-      const failCount = p.issues?.filter((i) => i.severity === "FAIL").length ?? 0;
-      const reviewCount = p.issues?.filter((i) => i.severity === "REVIEW").length ?? 0;
+      const failCount =
+        p.issues?.filter((i) => i.severity === "FAIL").length ?? 0;
+      const reviewCount =
+        p.issues?.filter((i) => i.severity === "REVIEW").length ?? 0;
       if (filter === "fail") return p.status === "ERROR" || failCount > 0;
-      if (filter === "warn") return p.status !== "ERROR" && failCount === 0 && reviewCount > 0;
-      if (filter === "ok") return p.status !== "ERROR" && failCount === 0 && reviewCount === 0;
+      if (filter === "warn")
+        return p.status !== "ERROR" && failCount === 0 && reviewCount > 0;
+      if (filter === "ok")
+        return p.status !== "ERROR" && failCount === 0 && reviewCount === 0;
       return true;
     }) ?? [];
 
@@ -1139,8 +1146,10 @@ function CrawlerAudit() {
           </CardTitle>
           <CardDescription>
             Insira o URL semente (ex:{" "}
-            <code className="bg-muted px-1 rounded text-xs">https://exemplo.com</code>)
-            - o sistema irá descobrir todos os links internos recursivamente e
+            <code className="bg-muted px-1 rounded text-xs">
+              https://exemplo.com
+            </code>
+            ) - o sistema irá descobrir todos os links internos recursivamente e
             auditar os cabeçalhos de cada página encontrada.
           </CardDescription>
         </CardHeader>
@@ -1150,7 +1159,12 @@ function CrawlerAudit() {
             className="flex flex-col sm:flex-row gap-3 items-end"
           >
             <div className="flex-1 space-y-1 w-full">
-              <label htmlFor="crawler-url-input" className="text-xs font-medium text-muted-foreground block">URL Semente</label>
+              <label
+                htmlFor="crawler-url-input"
+                className="text-xs font-medium text-muted-foreground block"
+              >
+                URL Semente
+              </label>
               <Input
                 id="crawler-url-input"
                 type="url"
@@ -1177,7 +1191,12 @@ function CrawlerAudit() {
             </div>
             {limitPages && (
               <div className="w-full sm:w-32 space-y-1 animate-in fade-in slide-in-from-left-2 duration-200">
-                <label htmlFor="crawler-max-pages" className="text-xs font-medium text-muted-foreground block">Máx. Páginas</label>
+                <label
+                  htmlFor="crawler-max-pages"
+                  className="text-xs font-medium text-muted-foreground block"
+                >
+                  Máx. Páginas
+                </label>
                 <Input
                   id="crawler-max-pages"
                   type="number"
@@ -1210,9 +1229,7 @@ function CrawlerAudit() {
       {loading && (
         <div className="flex flex-col items-center justify-center p-16 border rounded-xl bg-muted/30 text-muted-foreground">
           <Loader2 className="size-8 animate-spin mb-4 text-primary" />
-          <p className="font-medium">
-            A rastrear e auditar páginas...
-          </p>
+          <p className="font-medium">A rastrear e auditar páginas...</p>
           <p className="text-xs mt-1 opacity-70">
             Isto pode demorar alguns minutos dependendo do número de páginas.
           </p>
@@ -1227,7 +1244,8 @@ function CrawlerAudit() {
             Auditoria Recursiva por Crawler
           </CardTitle>
           <CardDescription className="max-w-sm mt-2 text-sm">
-            Insira um URL acima para rastrear o site e auditar automaticamente todos os seus cabeçalhos.
+            Insira um URL acima para rastrear o site e auditar automaticamente
+            todos os seus cabeçalhos.
           </CardDescription>
         </Card>
       )}
@@ -1253,7 +1271,8 @@ function CrawlerAudit() {
                 <div className="flex items-center gap-1.5">
                   <Clock className="size-3.5 text-slate-400" />
                   <span>
-                    <strong>Início:</strong> {new Date(result.iniciadoEm).toLocaleString("pt-PT")}
+                    <strong>Início:</strong>{" "}
+                    {new Date(result.iniciadoEm).toLocaleString("pt-PT")}
                   </span>
                 </div>
               )}
@@ -1261,7 +1280,8 @@ function CrawlerAudit() {
                 <div className="flex items-center gap-1.5">
                   <Clock className="size-3.5 text-slate-400" />
                   <span>
-                    <strong>Fim:</strong> {new Date(result.finalizadoEm).toLocaleString("pt-PT")}
+                    <strong>Fim:</strong>{" "}
+                    {new Date(result.finalizadoEm).toLocaleString("pt-PT")}
                   </span>
                 </div>
               )}
@@ -1348,7 +1368,9 @@ function CrawlerAudit() {
                   </p>
                   <p
                     className={`text-2xl font-bold ${
-                      compliantPages > 0 ? "text-emerald-600" : "text-foreground"
+                      compliantPages > 0
+                        ? "text-emerald-600"
+                        : "text-foreground"
                     }`}
                   >
                     {compliantPages}
@@ -1529,7 +1551,8 @@ function MultiUrlPaginationAudit() {
                 <div className="flex items-center gap-1.5">
                   <Clock className="size-3.5 text-slate-400" />
                   <span>
-                    <strong>Início:</strong> {new Date(result.iniciadoEm).toLocaleString("pt-PT")}
+                    <strong>Início:</strong>{" "}
+                    {new Date(result.iniciadoEm).toLocaleString("pt-PT")}
                   </span>
                 </div>
               )}
@@ -1537,7 +1560,8 @@ function MultiUrlPaginationAudit() {
                 <div className="flex items-center gap-1.5">
                   <Clock className="size-3.5 text-slate-400" />
                   <span>
-                    <strong>Fim:</strong> {new Date(result.finalizadoEm).toLocaleString("pt-PT")}
+                    <strong>Fim:</strong>{" "}
+                    {new Date(result.finalizadoEm).toLocaleString("pt-PT")}
                   </span>
                 </div>
               )}
@@ -1631,7 +1655,9 @@ function MultiUrlPaginationAudit() {
                   </p>
                   <p
                     className={`text-2xl font-bold ${
-                      compliantPages > 0 ? "text-emerald-600" : "text-foreground"
+                      compliantPages > 0
+                        ? "text-emerald-600"
+                        : "text-foreground"
                     }`}
                   >
                     {compliantPages}

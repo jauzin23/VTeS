@@ -31,34 +31,12 @@ EXTENSOES_IGNORAR = (
 JS_COOKIE_ACCEPT = r"""
 () => {
     try {
-        // Try known selectors first
-        const selectors = [
-            '.btn-acceptAll', '.btn-accept-all', '#accept-all', '#acceptAll',
-            '[class*="acceptAll"]', '[class*="accept-all"]', '[id*="acceptAll"]', '[id*="accept-all"]',
-            '.cookies-btn', '.cookie-btn', '[class*="cookie-btn"]', '[class*="cookies-btn"]',
-            '[class*="consent-btn"]', '[class*="cookie"] [class*="accept"]', '[id*="cookie"] [class*="accept"]'
-        ];
-        for (const sel of selectors) {
-            const el = document.querySelector(sel);
-            if (el && typeof el.click === 'function') {
-                el.click();
-                return "Clicked via selector: " + sel;
-            }
-        }
-
-        // Try text-based matching
-        const keywords = ['aceitar', 'accept', 'concordo', 'concordar', 'entendi', 'ok', 'permitir'];
-        const buttons = Array.from(document.querySelectorAll('button, a, [role="button"], [class*="btn"]'));
-        for (const btn of buttons) {
-            const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
-            if (
-                keywords.some(kw => text.includes(kw)) &&
-                !text.includes('recusar') &&
-                !text.includes('reject')
-            ) {
-                btn.click();
-                return "Clicked via text: " + text;
-            }
+        const palavras_chave = /aceitar|accept|agree|allow all|got it|ok, i agree|concordo|i agree/i;
+        const botao = Array.from(document.querySelectorAll("button, a, [role='button'], [class*='btn']"))
+            .find(el => palavras_chave.test(el.innerText || '') || palavras_chave.test(el.getAttribute('aria-label') || ''));
+        if (botao) {
+            botao.click();
+            return "Clicked";
         }
     } catch (e) {}
     return "Not clicked";
