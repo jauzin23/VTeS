@@ -8,7 +8,9 @@ from .browser import browser_manager
 
 logger = logging.getLogger("h_audit.multi_url")
 
-CRAWL_CONCURRENCY = 5
+import os
+
+CRAWL_CONCURRENCY = max(2, min(5, (os.cpu_count() or 4) // 2))
 DISCOVERY_CONCURRENCY = 1
 
 
@@ -114,7 +116,8 @@ async def run_multi_url_audit(raw_urls: list[str]) -> dict:
             async with audit_sem:
                 try:
                     crawl = await crawl_page(url, context=context, audit_cache=audit_cache)
-                    processed_html = inject_iframe_script(
+                    processed_html = await asyncio.to_thread(
+                        inject_iframe_script,
                         crawl.get("renderedHtml", ""),
                         crawl["finalUrl"],
                     )

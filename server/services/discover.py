@@ -379,6 +379,31 @@ async def discover_paginated_pages(start_url: str, context=None, audit_cache: di
 
     return discovered_pages
 
+JS_AGUARDAR_ESTABILIDADE = r"""
+async () => {
+    return new Promise(resolve => {
+        let lastCount = 0;
+        let sameCount = 0;
+        const check = () => {
+            const currentCount = document.querySelectorAll('img, a[href]').length;
+            if (currentCount === lastCount && currentCount > 0) {
+                sameCount++;
+            } else {
+                sameCount = 0;
+            }
+            lastCount = currentCount;
+            if (sameCount >= 6 || (currentCount > 30 && sameCount >= 3)) {
+                resolve(true);
+            } else {
+                setTimeout(check, 400);
+            }
+        };
+        check();
+        setTimeout(() => resolve(false), 8000);
+    });
+}
+"""
+
 JS_DETETAR_PAGINACAO = r"""
 async () => {
     const saida = {
@@ -577,6 +602,8 @@ JS_EXTRACT_DETAIL_LINKS = r"""
 
     // Layer 1: Specific card link wrappers and common patterns
     const specificSelectors = [
+        ".news-card a[href]",
+        ".news-card__link",
         ".events-card__link-wrapper",
         ".events-card a[href]",
         ".event-card a[href]",
@@ -693,12 +720,12 @@ async def discover_urls(start_url: str, context=None, audit_cache: dict = None) 
             # Full scroll down to trigger lazy load before extracting listing elements
             await scroll_down_page(page)
 
-            # Wait for listings
+            # Wait for listings using DOM stabilization
             try:
-                await page.locator(".ant-pagination, .ant-list-item, .ant-card, .article, .events-card__link-wrapper, [class*='card'], [class*='item']").first.wait_for(timeout=5000)
+                await page.evaluate(JS_AGUARDAR_ESTABILIDADE)
             except Exception:
                 pass
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(0.5)
 
             # Detect pagination DOM
             try:
@@ -799,6 +826,10 @@ async def discover_urls(start_url: str, context=None, audit_cache: dict = None) 
                     # Dynamic full scroll down
                     await scroll_down_page(page)
 
+                    try:
+                        await page.evaluate(JS_AGUARDAR_ESTABILIDADE)
+                    except Exception:
+                        pass
                     await asyncio.sleep(0.5)
 
                     links = await page.evaluate(JS_EXTRACT_DETAIL_LINKS, [resolved, DETAIL_PATH_IGNORES.pattern])
@@ -821,4 +852,4 @@ async def discover_urls(start_url: str, context=None, audit_cache: dict = None) 
             pass
 
     logger.info(f"Discovered {len(filtered_urls)} detail URLs.")
-    return filtered_urls[:20]
+    return filtered_urls

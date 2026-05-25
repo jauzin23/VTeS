@@ -1,5 +1,3 @@
-# Node / Frontend ignores
-node_modules/
 client/node_modules/
 client/.next/
 client/dist/
@@ -8,8 +6,8 @@ client/out/
 out/
 dist/
 *.tsbuildinfo
+node_modules/
 
-# Python / Backend ignores
 server/venv/
 server/__pycache__/
 __pycache__/
@@ -19,11 +17,12 @@ venv/
 *$py.class
 server/evidence/
 
-# Environment configurations (failsafe)
 .env
 .env.local
 .env.*.local
 
-# OS files
 .DS_Store
 Thumbs.db
+
+.agents/
+skills-lock.json

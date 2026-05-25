@@ -13,6 +13,11 @@ services:
       - AUDIT_CONCURRENCY=3
       - AUDIT_MAX_QUEUE=20
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
 
   frontend:
     build:
@@ -25,3 +30,7 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 150M

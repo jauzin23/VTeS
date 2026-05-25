@@ -175,7 +175,8 @@ async def api_audit(req: AuditRequest):
     try:
         crawl_res = await crawl_page(url)
 
-        processed_html = inject_iframe_script(
+        processed_html = await asyncio.to_thread(
+            inject_iframe_script,
             crawl_res.get("renderedHtml", ""),
             crawl_res["finalUrl"]
         )

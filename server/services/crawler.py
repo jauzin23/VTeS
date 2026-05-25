@@ -131,7 +131,17 @@ async def crawl_page(url: str, context=None, audit_cache: dict = None) -> dict:
 
         rendered_html = await page.content()
         final_url = page.url
-        soup = BeautifulSoup(rendered_html, "html.parser")
+
+        def _process_soup(html_content, target_url):
+            from bs4 import BeautifulSoup
+            s = BeautifulSoup(html_content, "html.parser")
+            import asyncio
+            # We can run analyze directly since it doesn't await anything internally on page
+            # Actually, analyze is async, so we can't run it easily in a sync thread directly unless we create a loop,
+            # BUT we can just do the BS4 parsing in the thread, and analyze in the main loop.
+            return s
+            
+        soup = await asyncio.to_thread(_process_soup, rendered_html, final_url)
 
         res = await HEADING_ANALYZER.analyze(page, soup, final_url)
         aspect_result = {

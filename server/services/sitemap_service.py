@@ -3,7 +3,7 @@ import logging
 import httpx
 import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
-from .discover import discover_urls, normalize_url
+from .discover import discover_paginated_pages, discover_urls, normalize_url
 from .crawler import crawl_page
 from .html_processor import inject_iframe_script
 from .browser import browser_manager
@@ -174,25 +174,38 @@ async def run_sitemap_audit(raw_input: str) -> dict:
     logger.info(f"Processing {len(sitemap_urls)} URLs from sitemap")
 
     # Step 2: For each sitemap URL, discover paginated sub-pages and audit headings inside a session context
-    results = []
+    groups_map: dict[str, dict] = {}
+    all_pages_to_audit: set[str] = set()
+    page_to_group: dict[str, str] = {}
     audit_cache = {}
 
     async with browser_manager.session_context(seed_url=base_url) as context:
-        all_pages_to_audit = set()
 
-        async def discover_for_url(url: str):
+        async def discover_for_url(input_url: str):
             """Discover paginated sub-pages for a given sitemap URL."""
             try:
-                sub_pages = await discover_urls(url, context=context, audit_cache=audit_cache)
-                if sub_pages:
-                    for p in sub_pages:
-                        all_pages_to_audit.add(normalize_url(p))
-                else:
-                    # No pagination found - just audit the URL itself
-                    all_pages_to_audit.add(normalize_url(url))
+                listing_pages = await discover_paginated_pages(input_url, context=context, audit_cache=audit_cache)
             except Exception as e:
-                logger.warning(f"Discovery failed for {url}: {e}")
-                all_pages_to_audit.add(normalize_url(url))
+                logger.warning(f"Discovery failed for {input_url}: {e}")
+                listing_pages = [input_url]
+
+            normalized_pages = []
+            for page in listing_pages:
+                normalized_page = normalize_url(page)
+                if normalized_page not in normalized_pages:
+                    normalized_pages.append(normalized_page)
+                all_pages_to_audit.add(normalized_page)
+                page_to_group[normalized_page] = input_url
+
+            has_pagination = len(normalized_pages) > 1
+
+            groups_map[input_url] = {
+                "inputUrl": input_url,
+                "pageCount": len(normalized_pages),
+                "hasPagination": has_pagination,
+                "pages": [],
+                "_pageUrls": normalized_pages,
+            }
 
         # Run discovery with limited concurrency
         discovery_sem = asyncio.Semaphore(4)
@@ -208,8 +221,8 @@ async def run_sitemap_audit(raw_input: str) -> dict:
         logger.info(f"Total pages to audit after discovery: {len(all_pages_to_audit)}")
 
         # Step 3: Audit headings on each page
+        audit_results: dict[str, dict] = {}
         audit_sem = asyncio.Semaphore(CRAWL_CONCURRENCY)
-        results_lock = asyncio.Lock()
 
         async def audit_page(url: str):
             async with audit_sem:
@@ -220,45 +233,71 @@ async def run_sitemap_audit(raw_input: str) -> dict:
                         crawl.get("renderedHtml", ""),
                         crawl["finalUrl"]
                     )
-                    async with results_lock:
-                        results.append({
-                            "url": url,
-                            "finalUrl": crawl["finalUrl"],
-                            "headings": crawl["headings"],
-                            "issues": crawl["result"]["issues"],
-                            "status": crawl["result"]["status"],
-                            "issueCount": len(crawl["result"]["issues"]),
-                            "hasFailures": any(i["severity"] == "FAIL" for i in crawl["result"]["issues"]),
-                            "processedHtml": processed_html,
-                            "auditadoEm": crawl.get("auditadoEm") or datetime.utcnow().isoformat() + "Z",
-                        })
+                    audit_results[url] = {
+                        "url": url,
+                        "finalUrl": crawl["finalUrl"],
+                        "headings": crawl["headings"],
+                        "issues": crawl["result"]["issues"],
+                        "status": crawl["result"]["status"],
+                        "issueCount": len(crawl["result"]["issues"]),
+                        "hasFailures": any(i["severity"] == "FAIL" for i in crawl["result"]["issues"]),
+                        "processedHtml": processed_html,
+                        "auditadoEm": crawl.get("auditadoEm") or datetime.utcnow().isoformat() + "Z",
+                    }
                 except Exception as e:
                     logger.warning(f"Audit failed for {url}: {e}")
-                    async with results_lock:
-                        results.append({
-                            "url": url,
-                            "finalUrl": url,
-                            "headings": [],
-                            "issues": [],
-                            "status": "ERROR",
-                            "issueCount": 0,
-                            "hasFailures": False,
-                            "processedHtml": None,
-                            "error": str(e),
-                            "auditadoEm": datetime.utcnow().isoformat() + "Z",
-                        })
+                    audit_results[url] = {
+                        "url": url,
+                        "finalUrl": url,
+                        "headings": [],
+                        "issues": [],
+                        "status": "ERROR",
+                        "issueCount": 0,
+                        "hasFailures": False,
+                        "processedHtml": None,
+                        "error": str(e),
+                        "auditadoEm": datetime.utcnow().isoformat() + "Z",
+                    }
 
         await asyncio.gather(
-            *(audit_page(url) for url in list(all_pages_to_audit)),
+            *(audit_page(url) for url in sorted(list(all_pages_to_audit))),
             return_exceptions=True
         )
 
-    # Sort results by URL
-    results.sort(key=lambda r: r["url"])
+    groups = []
+    total_issues = 0
+    pages_with_failures = 0
+    pages_with_warnings = 0
 
-    total_issues = sum(r["issueCount"] for r in results)
-    pages_with_failures = sum(1 for r in results if r.get("status") == "ERROR" or r.get("hasFailures"))
-    pages_with_warnings = sum(1 for r in results if r.get("status") != "ERROR" and not r.get("hasFailures") and any(i["severity"] == "REVIEW" for i in r.get("issues", [])))
+    for seed_url in sitemap_urls:
+        group = groups_map.get(seed_url)
+        if not group:
+            continue
+
+        page_results = []
+        for page_url in group["_pageUrls"]:
+            result = audit_results.get(page_url)
+            if result:
+                page_results.append(result)
+
+        page_results.sort(key=lambda page: page["url"])
+        group_issue_count = sum(page["issueCount"] for page in page_results)
+        group_pages_with_failures = sum(1 for page in page_results if page.get("status") == "ERROR" or page.get("hasFailures"))
+        group_pages_with_warnings = sum(1 for page in page_results if page.get("status") != "ERROR" and not page.get("hasFailures") and any(i["severity"] == "REVIEW" for i in page.get("issues", [])))
+
+        total_issues += group_issue_count
+        pages_with_failures += group_pages_with_failures
+        pages_with_warnings += group_pages_with_warnings
+
+        groups.append({
+            "inputUrl": group["inputUrl"],
+            "pageCount": len(page_results),
+            "hasPagination": group["hasPagination"],
+            "issueCount": group_issue_count,
+            "pagesWithFailures": group_pages_with_failures,
+            "pagesWithWarnings": group_pages_with_warnings,
+            "pages": page_results,
+        })
 
     finalized_at = datetime.utcnow().isoformat() + "Z"
     duracao = time.time() - start_time
@@ -267,11 +306,12 @@ async def run_sitemap_audit(raw_input: str) -> dict:
         "baseUrl": base_url,
         "sitemapUrl": base_url + "/sitemap.xml",
         "status": "completed",
-        "totalPages": len(results),
+        "totalInputUrls": len(sitemap_urls),
+        "totalPages": sum(group["pageCount"] for group in groups),
         "totalIssues": total_issues,
         "pagesWithFailures": pages_with_failures,
         "pagesWithWarnings": pages_with_warnings,
-        "pages": results,
+        "groups": groups,
         "iniciadoEm": iniciado_em,
         "finalizadoEm": finalized_at,
         "duracao": duracao,

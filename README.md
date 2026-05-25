@@ -19,24 +19,19 @@ Esta é uma ferramenta desenvolvida para validar a estrutura de cabeçalhos em p
 
 ---
 
-## 1. Instruções
-
-### Pré-requisitos
-
-- Docker.
-
 ### Iniciar a Aplicação
 
-1. Execute o seguinte comando:
-   ```bash
-   docker-compose up --build -d
-   ```
-2. Abra e aceda à ferramenta através do endereço: **http://localhost:3002**
-3. A API do backend ficará disponível em **http://localhost:3004**
+Execute o comando:
+
+```bash
+docker-compose up --build -d
+```
+
+Abra a ferramenta através do endereço: **http://localhost:3002**
 
 ---
 
-## 2. Utilização
+## Utilização
 
 A plataforma tem quatro modos. Abaixo, está como utilizar o modo de **Página Única**.
 
@@ -48,14 +43,10 @@ Este modo permite inserir um URL e retorna possíveis problemas com a hierarquia
   <img src="./docs/screenshots/pagina_unica.png" alt="Modo Página Única" style="max-width: 100%; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0px 4px 15px rgba(0,0,0,0.1);" />
 </div>
 
-1. No menu, selecione **Página Única**.
-2. Introduza o endereço web (exemplo: `https://www.alenquer.pt`).
-3. Clique no botão.
-
 O sistema irá processar a página e devolver o resultado com duas áreas:
 
-- **Relatório de Hierarquia**: Uma extração que apresenta se a árvore de H1, H2 e H3 está consistente.
-- **Visualização da Página**: A página é renderizada com as secções de TeS em destaque, permitindo visualizar o posicionamento de cada cabeçalho.
+**Relatório de Hierarquia**: Uma extração que apresenta se a árvore de H1, H2 e H3 está consistente.
+**Visualização da Página**: A página é renderizada com as secções em destaque, permitindo visualizar o posicionamento de cada cabeçalho.
 
 <div align="center">
   <img src="./docs/screenshots/resultado_iframe.png" alt="Exemplo da Auditoria de Página com renderização no iframe" style="max-width: 100%; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0px 4px 15px rgba(0,0,0,0.1);" />
@@ -68,3 +59,10 @@ O sistema irá processar a página e devolver o resultado com duas áreas:
 - **Crawler**: Exploração e verificação automática de um website.
 
 - **Validação Multi-URL**: Análise de uma lista de URLs.
+
+---
+
+## Páginas Testadas
+
+Por enquanto, a ferramenta foi testada nas seguintes páginas:
+[Notícias de Alenquer](https://www.alenquer.pt/noticias)

@@ -77,6 +77,10 @@ class BrowserManager:
                 "--disable-translate",
                 "--no-first-run",
             ]
+            import sys
+            if os.getenv("BROWSER_SINGLE_PROCESS", "False").lower() == "true" and sys.platform != "win32":
+                args.append("--single-process")
+            args.append("--js-flags=--max-old-space-size=128")
 
             headless_mode = os.getenv("PLAYWRIGHT_HEADLESS", "True").lower() == "true"
             self._browser = await self._playwright.chromium.launch(

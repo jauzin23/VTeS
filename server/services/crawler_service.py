@@ -583,8 +583,9 @@ async def run_crawler_audit(raw_input: str, max_pages: int = 100) -> dict:
         logger.info(f"Crawler found {len(discovered_urls)} URLs. Running browser audits...")
 
         results = []
-        # Using Playwright concurrency (e.g. 5)
-        audit_sem = asyncio.Semaphore(5)
+        import os
+        concurrency = max(2, min(5, (os.cpu_count() or 4) // 2))
+        audit_sem = asyncio.Semaphore(concurrency)
         results_lock = asyncio.Lock()
 
         async def audit_page(url: str):
@@ -592,7 +593,8 @@ async def run_crawler_audit(raw_input: str, max_pages: int = 100) -> dict:
                 try:
                     logger.info(f"Auditing page: {url}")
                     crawl = await crawl_page(url, context=context, audit_cache=audit_cache)
-                    processed_html = inject_iframe_script(
+                    processed_html = await asyncio.to_thread(
+                        inject_iframe_script,
                         crawl.get("renderedHtml", ""),
                         crawl["finalUrl"]
                     )
