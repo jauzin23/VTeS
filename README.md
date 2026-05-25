@@ -65,4 +65,5 @@ O sistema irá processar a página e devolver o resultado com duas áreas:
 ## Páginas Testadas
 
 Por enquanto, a ferramenta foi testada nas seguintes páginas:
+
 [Notícias de Alenquer](https://www.alenquer.pt/noticias)
