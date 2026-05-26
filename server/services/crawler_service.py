@@ -22,7 +22,7 @@ logger = logging.getLogger("tes.crawler_service")
 # Extensions to ignore during link discovery
 EXTENSOES_IGNORAR = (
     ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-    ".zip", ".rar", ".gz", ".tar", ".7z", ".exe",
+    ".zip", ".rar", ".gz", ".tar", ".7z", ".exe", ".kmz", ".kml",
     ".mp4", ".mp3", ".avi", ".mov", ".wmv", ".flv", ".ogg", ".wav",
     ".xml", ".json", ".csv", ".txt", ".svg", ".ico", ".css", ".js",
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp", ".tiff"
@@ -322,18 +322,15 @@ async def extract_links_with_playwright(
                     for href in (dom_pag.get("amostra_paginacao") or [])
                     if href
                 ]
-                if total_pages <= 1 and sample_pagination_urls:
-                    for sample_url in sample_pagination_urls:
-                        sample_param_name, sample_page_num = parse_page_param(sample_url)
-                        if sample_param_name:
-                            param_name = sample_param_name
-                        if sample_page_num and sample_page_num > total_pages:
-                            total_pages = sample_page_num
+
 
                 if total_pages > 1:
                     logger.info(f"Pagination detected on {url}: total_pages={total_pages}, param={param_name}")
-                    for page_num in range(2, total_pages + 1):
-                        page_url = build_page_url(url, page_num, param_name)
+                    # Cap artificial pagination injection to prevent queue flooding
+                    if next_href:
+                        links.append(next_href)
+                    else:
+                        page_url = build_page_url(url, 2, param_name)
                         links.append(page_url)
                 elif next_href:
                     logger.info(f"Next page link detected on {url}: {next_href}")

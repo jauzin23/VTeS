@@ -66,14 +66,14 @@ O sistema irá processar a página e devolver o resultado com duas áreas:
 
 Por enquanto, a ferramenta foi testada nas seguintes páginas:
 
-[Notícias de Alenquer](https://www.alenquer.pt/noticias) - 4 Páginas com Problemas
-[Agenda de Alenquer](https://www.alenquer.pt/agenda)
-[Avisos de Alenquer](https://www.alenquer.pt/avisos)
-
-[Agenda de Barrancos](https://cm-barrancos.pt/agenda)
-[Notícias de Barrancos](https://cm-barrancos.pt/noticias) - 1 Página com Problema
-[Avisos de Barrancos](https://cm-barrancos.pt/avisos)
-
-[Agenda de Caldas](https://www.mcr.pt/agenda)
-[Notícias de Caldas](https://www.mcr.pt/noticias) - 2 Páginas com Problemas
-[Avisos de Caldas](https://www.mcr.pt/avisos)
+- [Notícias de Alenquer](https://www.alenquer.pt/noticias) - 4 Páginas com Problemas
+- [Agenda de Alenquer](https://www.alenquer.pt/agenda)
+- [Avisos de Alenquer](https://www.alenquer.pt/avisos)
+  <br>
+- [Agenda de Barrancos](https://cm-barrancos.pt/agenda)
+- [Notícias de Barrancos](https://cm-barrancos.pt/noticias) - 1 Página com Problema
+- [Avisos de Barrancos](https://cm-barrancos.pt/avisos)
+  <br>
+- [Agenda de Caldas](https://www.mcr.pt/agenda)
+- [Notícias de Caldas](https://www.mcr.pt/noticias) - 2 Páginas com Problemas
+- [Avisos de Caldas](https://www.mcr.pt/avisos)

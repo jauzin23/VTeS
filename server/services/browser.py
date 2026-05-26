@@ -35,62 +35,87 @@ class BrowserManager:
         self._sem_tabs = asyncio.Semaphore(max_tabs)
         self._is_open = False
 
+    async def _close_internal(self) -> None:
+        if not self._is_open:
+            return
+        logger.info("Closing Playwright Chromium (internal)...")
+        try:
+            if self._context:
+                await self._context.close()
+        except Exception:
+            pass
+        finally:
+            self._context = None
+            try:
+                if self._browser:
+                    await self._browser.close()
+            except Exception:
+                pass
+            finally:
+                self._browser = None
+                try:
+                    if self._playwright:
+                        await self._playwright.stop()
+                except Exception:
+                    pass
+                finally:
+                    self._playwright = None
+        self._is_open = False
+        logger.info("Playwright Chromium closed.")
+
+    async def _start_internal(self) -> None:
+        if self._is_open:
+            return
+        logger.info("Starting Playwright Chromium instance...")
+        self._playwright = await async_playwright().start()
+
+        args = [
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            "--no-sandbox",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-extensions",
+            "--disable-background-networking",
+            "--disable-sync",
+            "--disable-translate",
+            "--no-first-run",
+        ]
+        import sys
+        if os.getenv("BROWSER_SINGLE_PROCESS", "False").lower() == "true" and sys.platform != "win32":
+            args.append("--single-process")
+        
+        max_old_space = os.getenv("PLAYWRIGHT_MAX_OLD_SPACE_SIZE", "512")
+        args.append(f"--js-flags=--max-old-space-size={max_old_space}")
+
+        headless_mode = os.getenv("PLAYWRIGHT_HEADLESS", "True").lower() == "true"
+        self._browser = await self._playwright.chromium.launch(
+            headless=headless_mode,
+            args=args
+        )
+        self._context = await self._browser.new_context(
+            user_agent=USER_AGENT,
+            locale="pt-PT",
+            viewport={"width": 1280, "height": 720},
+        )
+        await self._context.route("**/*", self._block_resources_custom)
+        self._is_open = True
+        logger.info("Playwright Chromium started.")
+
     async def start(self) -> None:
+        if self._is_open and self._browser and not self._browser.is_connected():
+            logger.warning("Browser disconnected. Resetting state...")
+            async with self._lock:
+                if self._is_open and self._browser and not self._browser.is_connected():
+                    await self._close_internal()
+
         if self._is_open:
             return
         async with self._lock:
-            if self._is_open:
-                return
-            logger.info("Starting Playwright Chromium instance...")
-            self._playwright = await async_playwright().start()
-
-            args = [
-                "--disable-gpu",
-                "--disable-dev-shm-usage",
-                "--no-sandbox",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-extensions",
-                "--disable-background-networking",
-                "--disable-sync",
-                "--disable-translate",
-                "--no-first-run",
-            ]
-            import sys
-            if os.getenv("BROWSER_SINGLE_PROCESS", "False").lower() == "true" and sys.platform != "win32":
-                args.append("--single-process")
-            args.append("--js-flags=--max-old-space-size=128")
-
-            headless_mode = os.getenv("PLAYWRIGHT_HEADLESS", "True").lower() == "true"
-            self._browser = await self._playwright.chromium.launch(
-                headless=headless_mode,
-                args=args
-            )
-            self._context = await self._browser.new_context(
-                user_agent=USER_AGENT,
-                locale="pt-PT",
-                viewport={"width": 1280, "height": 720},
-            )
-            await self._context.route("**/*", self._block_resources_custom)
-            self._is_open = True
-            logger.info("Playwright Chromium started.")
+            await self._start_internal()
 
     async def close(self) -> None:
         async with self._lock:
-            if not self._is_open:
-                return
-            logger.info("Closing Playwright Chromium...")
-            try:
-                if self._context:
-                    await self._context.close()
-            finally:
-                try:
-                    if self._browser:
-                        await self._browser.close()
-                finally:
-                    if self._playwright:
-                        await self._playwright.stop()
-            self._is_open = False
-            logger.info("Playwright Chromium closed.")
+            await self._close_internal()
 
     async def _block_resources_custom(self, route):
         req = route.request
@@ -139,7 +164,35 @@ class BrowserManager:
     async def page_in_context(self, context=None):
         await self.start()
         async with self._sem_tabs:
-            page = await self._context.new_page()
+            ctx = context if context is not None else self._context
+            
+            # Check if browser is disconnected before attempting new page
+            if self._browser and not self._browser.is_connected():
+                logger.warning("Browser disconnected before page creation in page_in_context. Restarting...")
+                async with self._lock:
+                    if self._browser and not self._browser.is_connected():
+                        await self._close_internal()
+                        await self._start_internal()
+                ctx = self._context
+
+            try:
+                page = await ctx.new_page()
+            except Exception as e:
+                err_str = str(e).lower()
+                if any(x in err_str for x in ("closed", "connection", "target", "handler")):
+                    logger.warning(f"Failed to create new page in page_in_context: {e}")
+                    async with self._lock:
+                        if self._context == ctx:
+                            logger.info("Restarting browser context...")
+                            await self._close_internal()
+                            await self._start_internal()
+                        else:
+                            logger.info("Browser context already restarted by another task.")
+                    ctx = self._context
+                    page = await ctx.new_page()
+                else:
+                    raise
+
             try:
                 yield page
             finally:
@@ -152,7 +205,32 @@ class BrowserManager:
     async def page(self):
         await self.start()
         async with self._sem_tabs:
-            page = await self._context.new_page()
+            if self._browser and not self._browser.is_connected():
+                logger.warning("Browser disconnected before page creation in page. Restarting...")
+                async with self._lock:
+                    if self._browser and not self._browser.is_connected():
+                        await self._close_internal()
+                        await self._start_internal()
+
+            ctx = self._context
+            try:
+                page = await ctx.new_page()
+            except Exception as e:
+                err_str = str(e).lower()
+                if any(x in err_str for x in ("closed", "connection", "target", "handler")):
+                    logger.warning(f"Failed to create new page in page: {e}")
+                    async with self._lock:
+                        if self._context == ctx:
+                            logger.info("Restarting browser context...")
+                            await self._close_internal()
+                            await self._start_internal()
+                        else:
+                            logger.info("Browser context already restarted by another task.")
+                    ctx = self._context
+                    page = await ctx.new_page()
+                else:
+                    raise
+
             try:
                 yield page
             finally:

@@ -110,7 +110,7 @@ def traverse_pagination_keys(next_data: dict) -> dict:
         return {}
     props = next_data.get("props", {}).get("pageProps", next_data)
     
-    total_keys = ("totalpages", "total_bytes", "pagecount", "page_count", "total_pages", "lastpage", "last_page")
+    total_keys = ("totalpages", "pagecount", "page_count", "total_pages", "lastpage", "last_page")
     current_keys = ("currentpage", "current_page", "page", "pagina_atual")
     
     def _find_val(obj, targets):
@@ -584,7 +584,7 @@ JS_EXTRACT_DETAIL_LINKS = r"""
             if (url.pathname === start.pathname && url.search === start.search) return true;
             if (url.pathname.length <= 1) return true;
             if (detailPathIgnores.test(url.pathname)) return true;
-            if (/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|zip|rar)$/i.test(url.pathname)) return true;
+            if (/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|zip|rar|kmz|kml)$/i.test(url.pathname)) return true;
             if (/\/page\/\d+/i.test(url.pathname) && !url.search) return true;
             if (/^(?:\/?(page|pagina|p)\/?\d+)$/.test(url.pathname.replace(/\/+$/, ""))) return true;
             return false;

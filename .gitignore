@@ -9,6 +9,7 @@ dist/
 node_modules/
 
 server/venv/
+server/analyzers/__pycache__/*
 server/__pycache__/
 __pycache__/
 .venv/
