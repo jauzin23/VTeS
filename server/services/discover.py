@@ -14,6 +14,14 @@ DETAIL_PATH_IGNORES = re.compile(
     re.I
 )
 
+def strip_www(netloc: str) -> str:
+    n = netloc.lower()
+    return n[4:] if n.startswith("www.") else n
+
+def same_site(netloc_a: str, netloc_b: str) -> bool:
+    return strip_www(netloc_a) == strip_www(netloc_b)
+
+
 PAGE_PARAM_CANDIDATES = ["page", "pagina", "pg", "p", "offset", "inicio"]
 # Pagination limits completely removed as requested
 
@@ -72,7 +80,7 @@ def should_ignore_detail_link(href: str, start_url: str, label: str = "") -> boo
     try:
         url = urlparse(href)
         start = urlparse(start_url)
-        if url.netloc and url.netloc != start.netloc:
+        if url.netloc and not same_site(url.netloc, start.netloc):
             return True
             
         path = url.path.lower()
@@ -298,39 +306,42 @@ async def discover_paginated_pages(start_url: str, context=None, audit_cache: di
 
             total_pages = 1
             param_name = "page"
-            next_href = normalize_url(dom_pag.get("nextHref") or "") if dom_pag.get("nextHref") else ""
+            next_href = ""
 
             url_param_name, _ = parse_page_param(normalized_start_url)
             if url_param_name:
                 param_name = url_param_name
 
-            if next_data:
-                next_info = traverse_pagination_keys(next_data)
-                if next_info.get("total_paginas"):
-                    total_pages = next_info["total_paginas"]
+            if dom_pag.get("has_pagination_class", False):
+                next_href = normalize_url(dom_pag.get("nextHref") or "") if dom_pag.get("nextHref") else ""
 
-            dom_total = dom_pag.get("paginacao_total") or 0
-            if dom_total > 1:
-                total_pages = max(total_pages, int(dom_total))
+                if next_data:
+                    next_info = traverse_pagination_keys(next_data)
+                    if next_info.get("total_paginas"):
+                        total_pages = next_info["total_paginas"]
 
-            if dom_pag.get("parametro_pagina"):
-                param_name = dom_pag["parametro_pagina"]
+                dom_total = dom_pag.get("paginacao_total") or 0
+                if dom_total > 1:
+                    total_pages = max(total_pages, int(dom_total))
 
-            if api_captured and api_captured.get("totalPages"):
-                total_pages = max(total_pages, int(api_captured["totalPages"]))
+                if dom_pag.get("parametro_pagina"):
+                    param_name = dom_pag["parametro_pagina"]
 
-            sample_pagination_urls = [
-                normalize_url(href)
-                for href in (dom_pag.get("amostra_paginacao") or [])
-                if href
-            ]
-            if total_pages <= 1 and sample_pagination_urls:
-                for sample_url in sample_pagination_urls:
-                    sample_param_name, sample_page_num = parse_page_param(sample_url)
-                    if sample_param_name:
-                        param_name = sample_param_name
-                    if sample_page_num and sample_page_num > total_pages:
-                        total_pages = sample_page_num
+                if api_captured and api_captured.get("totalPages"):
+                    total_pages = max(total_pages, int(api_captured["totalPages"]))
+
+                sample_pagination_urls = [
+                    normalize_url(href)
+                    for href in (dom_pag.get("amostra_paginacao") or [])
+                    if href
+                ]
+                if total_pages <= 1 and sample_pagination_urls:
+                    for sample_url in sample_pagination_urls:
+                        sample_param_name, sample_page_num = parse_page_param(sample_url)
+                        if sample_param_name:
+                            param_name = sample_param_name
+                        if sample_page_num and sample_page_num > total_pages:
+                            total_pages = sample_page_num
 
             if total_pages > 1:
                 for page_num in range(2, total_pages + 1):
@@ -369,7 +380,10 @@ async def discover_paginated_pages(start_url: str, context=None, audit_cache: di
                             pass
                         await asyncio.sleep(1.5)
                         next_dom = await page.evaluate(JS_DETETAR_PAGINACAO)
-                        current_next = normalize_url(next_dom.get("nextHref") or "") if next_dom.get("nextHref") else ""
+                        if next_dom.get("has_pagination_class", False):
+                            current_next = normalize_url(next_dom.get("nextHref") or "") if next_dom.get("nextHref") else ""
+                        else:
+                            current_next = ""
                     except Exception as e:
                         logger.warning(f"Failed following next pagination link {normalized_next}: {e}")
                         break
@@ -415,7 +429,13 @@ async () => {
         amostra_paginacao: [],
         deteccao: '',
         nextHref: '',
+        has_pagination_class: false,
     };
+    const hasPaginationClass = !!document.querySelector('[class*="pagination" i], [class*="paginacao" i]');
+    saida.has_pagination_class = hasPaginationClass;
+    if (!hasPaginationClass) {
+        return saida;
+    }
     const esperar = ms => new Promise(r => setTimeout(r, ms));
     const numerosDe = (nos) => {
         const vals = [];
@@ -580,7 +600,8 @@ JS_EXTRACT_DETAIL_LINKS = r"""
         try {
             const url = new URL(href, window.location.href);
             const start = new URL(startUrl);
-            if (url.origin !== start.origin) return true;
+            const cleanHost = (h) => h.toLowerCase().startsWith('www.') ? h.slice(4) : h;
+            if (url.protocol !== start.protocol || cleanHost(url.hostname) !== cleanHost(start.hostname)) return true;
             if (url.pathname === start.pathname && url.search === start.search) return true;
             if (url.pathname.length <= 1) return true;
             if (detailPathIgnores.test(url.pathname)) return true;
@@ -593,93 +614,25 @@ JS_EXTRACT_DETAIL_LINKS = r"""
         }
     };
 
-    const extractFromSelectors = (selectors) => {
-        const links = [];
-        const seen = new Set();
-        selectors.forEach(sel => {
-            document.querySelectorAll(sel).forEach(el => {
-                const anchors = el.tagName.toLowerCase() === 'a' ? [el] : Array.from(el.querySelectorAll('a[href]'));
-                anchors.forEach(a => {
-                    const href = a.href;
-                    const label = ((a.innerText || a.textContent || "") + " " + (a.getAttribute("aria-label") || "")).trim();
-                    if (!shouldIgnore(href, label, a)) {
-                        try {
-                            const normUrl = href.replace(/\/$/, "");
-                            if (!seen.has(normUrl)) {
-                                seen.add(normUrl);
-                                links.push(href);
-                            }
-                        } catch(e){}
-                    }
-                });
-            });
-        });
-        return links;
-    };
-
-    // Layer 1: Specific card link wrappers and common patterns
-    const specificSelectors = [
-        ".news-card a[href]",
-        ".news-card__link",
-        ".events-card__link-wrapper",
-        ".events-card a[href]",
-        ".event-card a[href]",
-        ".agenda-card a[href]",
-        "a[class*='link-wrapper']",
-        "a[class*='card-link']",
-        "a[class*='item-link']",
-        "[class*='card__link-wrapper']",
-        "[class*='card__link']",
-        "[class*='events-card'] a[href]",
-        "[class*='event-card'] a[href]",
-        "[class*='agenda-card'] a[href]",
-        "[class*='noticia-card'] a[href]",
-        "[class*='noticias-card'] a[href]",
-        "[class*='post-card'] a[href]"
-    ];
-    let results = extractFromSelectors(specificSelectors);
-    if (results.length > 0) return results;
-
-    // Layer 2: Generic cards/list items
-    const genericSelectors = [
-        "[class*='card'] a[href]",
-        "[class*='item'] a[href]",
-        "[class*='grid'] a[href]",
-        "[class*='list__item'] a[href]",
-        "[class*='list-item'] a[href]",
-        "[class*='post'] a[href]",
-        "article a[href]"
-    ];
-    results = extractFromSelectors(genericSelectors);
-    if (results.length > 0) return results;
-
-    // Layer 3: Fallback - original main content container search
-    const containers = [
-        "main", '[role="main"]', "article", "section", ".content", '[class*="content"]',
-        ".card", '[class*="card"]', '[class*="list"]', '[class*="grid"]', '[class*="item"]', "body"
-    ].flatMap(sel => Array.from(document.querySelectorAll(sel)))
-     .filter((c, idx, self) => self.indexOf(c) === idx);
-
-    const targets = containers.length ? containers : [document.body];
+    const allAnchors = document.querySelectorAll('a[href]');
+    const links = [];
     const seen = new Set();
-    const fallbackLinks = [];
-    targets.forEach(c => {
-        c.querySelectorAll('a[href]').forEach(a => {
-            const href = a.href;
-            const label = ((a.innerText || a.textContent || "") + " " + (a.getAttribute("aria-label") || "")).trim();
-            if (!shouldIgnore(href, label, a)) {
-                try {
-                    const normUrl = href.replace(/\/$/, "");
-                    if (!seen.has(normUrl)) {
-                        seen.add(normUrl);
-                        fallbackLinks.push(href);
-                    }
-                } catch(e){}
-            }
-        });
+    
+    allAnchors.forEach(a => {
+        const href = a.href;
+        const label = ((a.innerText || a.textContent || "") + " " + (a.getAttribute("aria-label") || "")).trim();
+        if (!shouldIgnore(href, label, a)) {
+            try {
+                const normUrl = href.replace(/\/$/, "");
+                if (!seen.has(normUrl)) {
+                    seen.add(normUrl);
+                    links.push(href);
+                }
+            } catch(e){}
+        }
     });
 
-    return fallbackLinks;
+    return links;
 }
 """
 
@@ -761,31 +714,35 @@ async def discover_urls(start_url: str, context=None, audit_cache: dict = None) 
             # Compute pagination details
             total_pages = 1
             param_name = "page"
-            next_href = dom_pag.get("nextHref") or ""
-            detection_source = dom_pag.get("deteccao") or ""
+            next_href = ""
+            detection_source = ""
 
             # Query param checks
             url_param_name, url_param_val = parse_page_param(normalized_start_url)
             if url_param_name:
                 param_name = url_param_name
 
-            if next_data:
-                next_info = traverse_pagination_keys(next_data)
-                if next_info.get("total_paginas"):
-                    total_pages = next_info["total_paginas"]
-                    detection_source = "next_data"
-
-            dom_total = dom_pag.get("paginacao_total") or 0
-            if dom_total > 1:
-                total_pages = max(total_pages, int(dom_total))
+            if dom_pag.get("has_pagination_class", False):
+                next_href = dom_pag.get("nextHref") or ""
                 detection_source = dom_pag.get("deteccao") or "dom_pagination"
-                
-            if dom_pag.get("parametro_pagina"):
-                param_name = dom_pag["parametro_pagina"]
 
-            if api_captured:
-                total_pages = max(total_pages, api_captured["totalPages"])
-                detection_source = "xhr_log"
+                if next_data:
+                    next_info = traverse_pagination_keys(next_data)
+                    if next_info.get("total_paginas"):
+                        total_pages = next_info["total_paginas"]
+                        detection_source = "next_data"
+
+                dom_total = dom_pag.get("paginacao_total") or 0
+                if dom_total > 1:
+                    total_pages = max(total_pages, int(dom_total))
+                    detection_source = dom_pag.get("deteccao") or "dom_pagination"
+                    
+                if dom_pag.get("parametro_pagina"):
+                    param_name = dom_pag["parametro_pagina"]
+
+                if api_captured:
+                    total_pages = max(total_pages, api_captured["totalPages"])
+                    detection_source = "xhr_log"
 
             logger.info(f"Pagination Detection Source: {detection_source}, total={total_pages}, param={param_name}")
 
@@ -857,11 +814,11 @@ async def discover_urls(start_url: str, context=None, audit_cache: dict = None) 
         await asyncio.gather(*(crawl_listing_page(u) for u in pages_to_crawl), return_exceptions=True)
 
     # Filter by origin
-    start_origin = urlparse(normalized_start_url).netloc
+    start_origin = normalized_start_url
     filtered_urls = []
     for href in discovered_detail_urls:
         try:
-            if urlparse(href).netloc == start_origin:
+            if same_site(urlparse(href).netloc, urlparse(start_origin).netloc):
                 filtered_urls.append(href)
         except Exception:
             pass

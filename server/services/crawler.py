@@ -25,19 +25,23 @@ JS_EXTRACT_HEADINGS = r"""
     }
 
     return Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6'))
-        .filter(el => {
-            const s = window.getComputedStyle(el);
-            return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
-        })
         .map((el, index) => {
             return {
-                index,
+                element: el,
+                index: index,
                 tag: el.tagName.toLowerCase(),
                 level: parseInt(el.tagName[1]),
                 text: (el.innerText || el.textContent || '').trim().slice(0, 150),
                 outerHTML: el.outerHTML.slice(0, 400),
                 xpath: getXPath(el)
             };
+        })
+        .filter(item => {
+            const el = item.element;
+            const s = window.getComputedStyle(el);
+            const isVisible = s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+            delete item.element;
+            return isVisible;
         });
 }
 """

@@ -96,7 +96,7 @@ function HeadingTree({
   compact = false,
 }: {
   headings: Heading[];
-  onSelect?: (index: number) => void;
+  onSelect?: (index: number, xpath: string, text: string) => void;
   selectedIndex?: number | null;
   compact?: boolean;
 }) {
@@ -114,7 +114,7 @@ function HeadingTree({
         return (
           <button
             key={i}
-            onClick={() => onSelect?.(h.index)}
+            onClick={() => onSelect?.(h.index, h.xpath || "", h.text || "")}
             className={`w-full flex items-start gap-2 text-left transition-colors rounded px-1 py-1 border-b last:border-b-0 ${
               isSelected
                 ? "bg-amber-50 border-l-2 border-l-amber-400"
@@ -234,9 +234,9 @@ function SinglePageAudit() {
     iframeRef.current?.contentWindow?.postMessage(msg, "*");
   }
 
-  function handleSelectHeading(index: number) {
+  function handleSelectHeading(index: number, xpath: string, text: string) {
     setSelectedHeading(index);
-    sendToIframe({ type: "select-heading", index });
+    sendToIframe({ type: "select-heading", index, xpath, text });
   }
 
   function handleHighlightXPath(xpath: string, text?: string) {
@@ -567,9 +567,9 @@ function SitemapPageRow({
     iframeRef.current?.contentWindow?.postMessage(msg, "*");
   }, []);
 
-  function handleSelectHeading(idx: number) {
+  function handleSelectHeading(idx: number, xpath: string, text: string) {
     setSelectedHeading(idx);
-    sendToIframe({ type: "select-heading", index: idx });
+    sendToIframe({ type: "select-heading", index: idx, xpath, text });
   }
 
   function handleHighlightXPath(xpath: string, text: string) {

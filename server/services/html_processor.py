@@ -47,8 +47,22 @@ INTERACTIVE_SCRIPT = """<script>
   window.addEventListener('message', function (e) {
     if (!e.data) return;
     if (e.data.type === 'select-heading') {
-      var hs = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6'));
-      hl(hs[e.data.index] || null);
+      var el = null;
+      if (e.data.xpath) {
+        el = byXP(e.data.xpath);
+      }
+      if (!el && typeof e.data.index === 'number') {
+        var hs = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6'));
+        el = hs[e.data.index] || null;
+      }
+      if (!el && e.data.text) {
+        var all = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6'));
+        var targetText = e.data.text.replace(/\\s+/g, ' ').trim();
+        el = all.find(function(n) {
+          return (n.innerText || n.textContent || '').replace(/\\s+/g, ' ').trim() === targetText;
+        }) || null;
+      }
+      hl(el);
     }
     if (e.data.type === 'highlight-xpath') {
       var el = byXP(e.data.xpath);
@@ -158,9 +172,11 @@ def inject_iframe_script(html: str, final_url: str) -> str:
     html = _fix_tag_attr(html, 'video',  'src',    final_url)
     html = _fix_tag_attr(html, 'audio',  'src',    final_url)
 
-    # Disable all original scripts to prevent React/Next.js hydration errors
-    html = re.sub(r'<script\b', '<template', html, flags=re.IGNORECASE)
-    html = re.sub(r'</script\s*>', '</template>', html, flags=re.IGNORECASE)
+    # Disable all original scripts to prevent React/Next.js hydration errors.
+    # To keep Playwright XPaths valid, we MUST keep the node name as <script>.
+    # We replace any existing type attribute and add type="javascript/blocked".
+    html = re.sub(r'(<script\b[^>]*?)\s+type=["\'][^"\']*["\']', r'\1', html, flags=re.IGNORECASE)
+    html = re.sub(r'<script\b', '<script type="javascript/blocked"', html, flags=re.IGNORECASE)
 
     # ── 3. Inject interactive postMessage script before </body> ──────────────
 

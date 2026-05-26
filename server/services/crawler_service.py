@@ -135,16 +135,23 @@ def normalize_crawler_url(url_str: str) -> str:
     except Exception:
         return url_str
 
-def filter_and_normalize_links(links: list[str], target_host: str) -> list[str]:
+def filter_and_normalize_links(links: list[str], target_host: str, seed_netloc: str) -> list[str]:
     filtered = []
     for link in links:
         normalized = normalize_crawler_url(link)
         if not is_valid_url(normalized):
             continue
-        path = urlparse(normalized).path.lower()
-        if path.endswith(EXTENSOES_IGNORAR):
+        p = urlparse(normalized)
+        
+        # Normalize www vs non-www to match seed_netloc precisely if they are the same site
+        if same_site(p.netloc, seed_netloc):
+            normalized = urlunparse((p.scheme, seed_netloc, p.path, p.params, p.query, p.fragment))
+            p = urlparse(normalized)
+        else:
             continue
-        if not same_site(urlparse(normalized).netloc, target_host):
+
+        path = p.path.lower()
+        if path.endswith(EXTENSOES_IGNORAR):
             continue
         filtered.append(normalized)
     return filtered
@@ -299,39 +306,48 @@ async def extract_links_with_playwright(
 
                 total_pages = 1
                 param_name = "page"
-                next_href = normalize_url(dom_pag.get("nextHref") or "") if dom_pag.get("nextHref") else ""
+                next_href = ""
 
-                url_param_name, _ = parse_page_param(url)
+                url_param_name, current_page_val = parse_page_param(url)
                 if url_param_name:
                     param_name = url_param_name
 
-                if next_data:
-                    next_info = traverse_pagination_keys(next_data)
-                    if next_info.get("total_paginas"):
-                        total_pages = next_info["total_paginas"]
+                if dom_pag.get("has_pagination_class", False):
+                    next_href = normalize_url(dom_pag.get("nextHref") or "") if dom_pag.get("nextHref") else ""
 
-                dom_total = dom_pag.get("paginacao_total") or 0
-                if dom_total > 1:
-                    total_pages = max(total_pages, int(dom_total))
+                    if next_data:
+                        next_info = traverse_pagination_keys(next_data)
+                        if next_info.get("total_paginas"):
+                            total_pages = next_info["total_paginas"]
 
-                if dom_pag.get("parametro_pagina"):
-                    param_name = dom_pag["parametro_pagina"]
+                    dom_total = dom_pag.get("paginacao_total") or 0
+                    if dom_total > 1:
+                        total_pages = max(total_pages, int(dom_total))
 
-                sample_pagination_urls = [
-                    normalize_url(href)
-                    for href in (dom_pag.get("amostra_paginacao") or [])
-                    if href
-                ]
+                    if dom_pag.get("parametro_pagina"):
+                        param_name = dom_pag["parametro_pagina"]
 
+                    sample_pagination_urls = [
+                        normalize_url(href)
+                        for href in (dom_pag.get("amostra_paginacao") or [])
+                        if href
+                    ]
+
+                    if total_pages <= 1 and sample_pagination_urls:
+                        for sample_url in sample_pagination_urls:
+                            sample_param_name, sample_page_num = parse_page_param(sample_url)
+                            if sample_param_name:
+                                param_name = sample_param_name
+                            if sample_page_num and sample_page_num > total_pages:
+                                total_pages = sample_page_num
 
                 if total_pages > 1:
                     logger.info(f"Pagination detected on {url}: total_pages={total_pages}, param={param_name}")
-                    # Cap artificial pagination injection to prevent queue flooding
+                    for page_num in range(2, total_pages + 1):
+                        page_url = build_page_url(url, page_num, param_name)
+                        links.append(page_url)
                     if next_href:
                         links.append(next_href)
-                    else:
-                        page_url = build_page_url(url, 2, param_name)
-                        links.append(page_url)
                 elif next_href:
                     logger.info(f"Next page link detected on {url}: {next_href}")
                     links.append(next_href)
@@ -391,7 +407,8 @@ async def crawl_worker(
             )
 
             # Filter and normalize links
-            filtered_links = filter_and_normalize_links(raw_links, target_host)
+            seed_netloc = urlparse(seed_url).netloc
+            filtered_links = filter_and_normalize_links(raw_links, target_host, seed_netloc)
 
             # Enqueue newly discovered links
             for normalized in filtered_links:

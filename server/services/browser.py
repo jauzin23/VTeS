@@ -251,17 +251,18 @@ async def scroll_down_page(page) -> None:
                 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
                 let lastHeight = document.body.scrollHeight;
                 let steps = 0;
-                while (steps < 4) {
-                    window.scrollBy(0, window.innerHeight * 2);
-                    await delay(100);
+                const maxSteps = 25;
+                while (steps < maxSteps) {
+                    window.scrollBy(0, window.innerHeight * 1.5);
+                    await delay(200);
                     let newHeight = document.body.scrollHeight;
                     let currentScroll = window.scrollY + window.innerHeight;
-                    if (currentScroll >= newHeight - 15) {
+                    if (currentScroll >= newHeight - 30) {
                         // Wait slightly more at the bottom to check for lazy-loaded content
-                        await delay(100);
+                        await delay(300);
                         newHeight = document.body.scrollHeight;
                         currentScroll = window.scrollY + window.innerHeight;
-                        if (currentScroll >= newHeight - 15) {
+                        if (currentScroll >= newHeight - 30) {
                             break;
                         }
                     }
@@ -269,7 +270,7 @@ async def scroll_down_page(page) -> None:
                     steps++;
                 }
                 window.scrollTo(0, 0);
-                await delay(100);
+                await delay(150);
             }
         """)
     except Exception as e:
