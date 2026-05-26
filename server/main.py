@@ -17,6 +17,7 @@ from services.multi_url_service import run_multi_url_audit
 from services.sitemap_service import run_sitemap_audit
 from services.crawler_service import run_crawler_audit
 from services.html_processor import inject_iframe_script
+from services.fila import fila
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("tes.server")
@@ -49,39 +50,6 @@ class SimpleCache:
             self.store[key] = (value, now + self.ttl)
 
 
-class AuditQueue:
-    def __init__(self, concurrency: int = 3, max_queue: int = 20):
-        self._sem = asyncio.Semaphore(concurrency)
-        self._waiting = 0
-        self._active = 0
-        self._max_queue = max_queue
-        self._lock = asyncio.Lock()
-
-    async def acquire(self) -> bool:
-        async with self._lock:
-            if self._waiting >= self._max_queue:
-                return False
-            self._waiting += 1
-
-        await self._sem.acquire()
-
-        async with self._lock:
-            self._waiting -= 1
-            self._active += 1
-        return True
-
-    def release(self):
-        self._sem.release()
-        self._active = max(0, self._active - 1)
-
-    @property
-    def size(self):
-        return self._waiting
-
-    @property
-    def pending(self):
-        return self._active
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -104,11 +72,8 @@ app.add_middleware(
 
 CACHE_MAX_SIZE = int(os.getenv("CACHE_MAX_SIZE", "200"))
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "600"))
-AUDIT_CONCURRENCY = int(os.getenv("AUDIT_CONCURRENCY", "3"))
-AUDIT_MAX_QUEUE = int(os.getenv("AUDIT_MAX_QUEUE", "20"))
 
 cache = SimpleCache(max_size=CACHE_MAX_SIZE, ttl_seconds=CACHE_TTL_SECONDS)
-queue = AuditQueue(concurrency=AUDIT_CONCURRENCY, max_queue=AUDIT_MAX_QUEUE)
 
 
 class DiscoverRequest(BaseModel):
@@ -121,7 +86,7 @@ class AuditRequest(BaseModel):
 
 
 class SitemapRequest(BaseModel):
-    url: str  # domain like "example.com" or "https://example.com"
+    url: str 
 
 
 class MultiUrlAuditRequest(BaseModel):
@@ -162,17 +127,7 @@ async def api_audit(req: AuditRequest):
             cached_copy["daCache"] = True
             return cached_copy
 
-    acquired = await queue.acquire()
-    if not acquired:
-        return JSONResponse(
-            status_code=429,
-            content={
-                "erro": "Servidor ocupado. Tente novamente em breve.",
-                "retryAfter": 30,
-            }
-        )
-
-    try:
+    async def _executar_audit():
         crawl_res = await crawl_page(url)
 
         processed_html = await asyncio.to_thread(
@@ -192,6 +147,11 @@ async def api_audit(req: AuditRequest):
 
         await cache.set(cache_key, result)
         return result
+
+    try:
+        return await fila.executar(_executar_audit)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception(f"Error auditing page {url}")
         status_code = 500
@@ -202,8 +162,6 @@ async def api_audit(req: AuditRequest):
             except ValueError:
                 pass
         return JSONResponse(status_code=status_code, content={"erro": err_msg})
-    finally:
-        queue.release()
 
 
 @app.post("/api/sitemap")
@@ -217,10 +175,15 @@ async def api_sitemap(req: SitemapRequest):
     if cached:
         return {**cached, "daCache": True}
 
-    try:
+    async def _executar_sitemap():
         result = await run_sitemap_audit(url)
         await cache.set(cache_key, result)
         return result
+
+    try:
+        return await fila.executar(_executar_sitemap)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception(f"Error running sitemap audit for {url}")
         raise HTTPException(status_code=500, detail=f"Erro no audit de sitemap: {str(e)}")
@@ -238,10 +201,15 @@ async def api_crawler(req: CrawlerRequest):
     if cached:
         return {**cached, "daCache": True}
 
-    try:
+    async def _executar_crawler():
         result = await run_crawler_audit(url, max_pages=max_pages)
         await cache.set(cache_key, result)
         return result
+
+    try:
+        return await fila.executar(_executar_crawler)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception(f"Error running crawler audit for {url}")
         raise HTTPException(status_code=500, detail=f"Erro no crawler: {str(e)}")
@@ -258,10 +226,15 @@ async def api_multi_url_audit(req: MultiUrlAuditRequest):
     if cached:
         return {**cached, "daCache": True}
 
-    try:
+    async def _executar_multi_url():
         result = await run_multi_url_audit(urls)
         await cache.set(cache_key, result)
         return result
+
+    try:
+        return await fila.executar(_executar_multi_url)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Error running multi-url audit")
         raise HTTPException(status_code=500, detail=f"Erro no audit multi-url: {str(e)}")
@@ -271,8 +244,7 @@ async def api_multi_url_audit(req: MultiUrlAuditRequest):
 async def api_health():
     return {
         "ok": True,
-        "queue": queue.size,
-        "pending": queue.pending,
+        **fila.info(),
     }
 
 

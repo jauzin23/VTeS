@@ -10,8 +10,9 @@ services:
       - PLAYWRIGHT_MAX_TABS=10
       - CACHE_MAX_SIZE=200
       - CACHE_TTL_SECONDS=600
-      - AUDIT_CONCURRENCY=3
-      - AUDIT_MAX_QUEUE=20
+      # Fila e Gestão de Concorrência
+      - MAX_CONCURRENT_TASKS=1
+      - MAX_QUEUE_SIZE=10
     restart: unless-stopped
     deploy:
       resources:

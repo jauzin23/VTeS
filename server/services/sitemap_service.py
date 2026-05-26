@@ -26,7 +26,6 @@ def same_site(netloc_a: str, netloc_b: str) -> bool:
 
 
 def normalize_base_url(raw: str) -> str:
-    """Normalize an input like 'example.com' or 'https://example.com' to https://example.com"""
     raw = raw.strip()
     if not raw.startswith(("http://", "https://")):
         raw = "https://" + raw

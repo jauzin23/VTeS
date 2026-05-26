@@ -105,6 +105,11 @@ export interface MultiUrlAuditResult {
 
 export interface HealthStatus {
   ok: boolean;
-  queue: number;
-  pending: number;
+  fila: {
+    em_espera: number;
+    em_execucao: number;
+    total_executadas: number;
+    max_concurrent: number;
+    max_queue_size: number;
+  };
 }
