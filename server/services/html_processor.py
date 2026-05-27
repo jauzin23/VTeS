@@ -1,21 +1,5 @@
-"""
-HTML processor for iframe preview.
-
-Uses REGEX-ONLY approach (not BeautifulSoup) so the DOM structure is
-preserved byte-for-byte from Playwright's render.  This keeps every
-XPath that the analyzers generated valid inside the iframe.
-
-Steps:
-  1. Inject a real static <base href="..."> tag at the start of <head>
-  2. Absolutize relative URLs in <link href>, <script src>, <img src>, <source src>
-     using regex so no DOM element is added/removed/reordered.
-  3. Inject the interactive postMessage script before </body>.
-"""
-
 import re
 from urllib.parse import urljoin
-
-# ─── Interactive script ───────────────────────────────────────────────────────
 
 INTERACTIVE_SCRIPT = """<script>
 (function () {
@@ -87,11 +71,7 @@ INTERACTIVE_SCRIPT = """<script>
 })();
 </script>"""
 
-
-# ─── URL helpers ──────────────────────────────────────────────────────────────
-
 def _fix_url(url: str, base_url: str) -> str:
-    """Make a single URL absolute. Returns the input unchanged if already absolute."""
     url = url.strip()
     if not url:
         return url
@@ -104,12 +84,6 @@ def _fix_url(url: str, base_url: str) -> str:
 
 
 def _fix_tag_attr(html: str, tag: str, attr: str, base_url: str) -> str:
-    """
-    Absolutize URLs in <tag attr="..."> using regex.
-    The HTML structure is NOT parsed - only the attribute value is replaced.
-    """
-    # Match <tag ...whitespace... attr="url"> or attr='url'
-    # The tag may have other attributes before `attr`.
     pattern = re.compile(
         rf'(<{tag}\b[^>]*?\b{attr}=)(["\'])([^"\']*)\2',
         re.IGNORECASE | re.DOTALL,
@@ -120,35 +94,15 @@ def _fix_tag_attr(html: str, tag: str, attr: str, base_url: str) -> str:
 
     return pattern.sub(replacer, html)
 
-
-# ─── Main entry point ─────────────────────────────────────────────────────────
-
 def inject_iframe_script(html: str, final_url: str) -> str:
-    """
-    Process Playwright-rendered HTML for use as an iframe srcDoc.
-
-    Critically, this function uses ONLY string/regex operations so that
-    the DOM structure (element order, sibling counts) is identical to what
-    Playwright saw when it generated the XPaths. If BeautifulSoup were used
-    to re-serialize the HTML, sibling indices in XPaths would shift and
-    'highlight-xpath' postMessages would silently fail.
-    """
     if not html:
         return html
-
-    # ── 1. Inject static <base> tag at the start of <head> ──────────────────
-    #
-    # Must be the FIRST element inside <head> so the browser uses it to
-    # resolve all subsequent <link href> and <script src> before fetching.
-    # Adding it via JavaScript is too late - stylesheets are fetched during
-    # HTML parsing, before any script runs.
 
     base_tag = f'<base href="{final_url}" target="_blank">'
 
     head_match = re.search(r'<head[^>]*>', html, re.IGNORECASE)
     if head_match:
         insert_at = head_match.end()
-        # If a <base> already exists, replace its href instead of adding another
         existing_base = re.search(r'<base\b[^>]*/?\s*>', html, re.IGNORECASE)
         if existing_base:
             html = re.sub(
@@ -161,10 +115,7 @@ def inject_iframe_script(html: str, final_url: str) -> str:
         else:
             html = html[:insert_at] + base_tag + html[insert_at:]
     else:
-        # No <head> tag - prepend
         html = base_tag + html
-
-    # ── 2. Absolutize relative asset URLs (regex, no DOM parse) ─────────────
 
     html = _fix_tag_attr(html, 'link',   'href',   final_url)
     html = _fix_tag_attr(html, 'img',    'src',    final_url)
@@ -172,13 +123,8 @@ def inject_iframe_script(html: str, final_url: str) -> str:
     html = _fix_tag_attr(html, 'video',  'src',    final_url)
     html = _fix_tag_attr(html, 'audio',  'src',    final_url)
 
-    # Disable all original scripts to prevent React/Next.js hydration errors.
-    # To keep Playwright XPaths valid, we MUST keep the node name as <script>.
-    # We replace any existing type attribute and add type="javascript/blocked".
     html = re.sub(r'(<script\b[^>]*?)\s+type=["\'][^"\']*["\']', r'\1', html, flags=re.IGNORECASE)
     html = re.sub(r'<script\b', '<script type="javascript/blocked"', html, flags=re.IGNORECASE)
-
-    # ── 3. Inject interactive postMessage script before </body> ──────────────
 
     body_close = re.search(r'</body\s*>', html, re.IGNORECASE)
     if body_close:

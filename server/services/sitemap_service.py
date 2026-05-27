@@ -39,7 +39,6 @@ async def fetch_sitemap_urls(base_url: str) -> list[str]:
     parsed = urlparse(base_url)
     base_netloc = parsed.netloc
 
-    # Build candidate sitemap URLs: original first, then www/non-www alternative
     candidates = [base_url.rstrip("/") + "/sitemap.xml"]
     if base_netloc.startswith("www."):
         alt = f"{parsed.scheme}://{base_netloc[4:]}/sitemap.xml"
@@ -88,7 +87,6 @@ async def _fetch_and_parse_sitemap(client: httpx.AsyncClient, sitemap_url: str, 
         root = ET.fromstring(content)
         tag = root.tag.lower()
 
-        # Sitemap index - contains nested sitemaps
         if "sitemapindex" in tag:
             logger.info(f"Found sitemap index at {sitemap_url}")
             nested_urls = []
@@ -98,7 +96,6 @@ async def _fetch_and_parse_sitemap(client: httpx.AsyncClient, sitemap_url: str, 
                     if nested_sitemap_url:
                         nested_urls.append(nested_sitemap_url)
 
-            # Fetch nested sitemaps concurrently (limit to 10)
             tasks = [
                 _fetch_and_parse_sitemap(client, url, base_url, depth + 1)
                 for url in nested_urls[:10]
@@ -108,22 +105,18 @@ async def _fetch_and_parse_sitemap(client: httpx.AsyncClient, sitemap_url: str, 
                 if isinstance(r, list):
                     urls.extend(r)
 
-        # Regular sitemap - contains page <loc> elements
         elif "urlset" in tag:
             base_netloc = urlparse(base_url).netloc
             for elem in root.iter():
                 if elem.tag.endswith("}loc") or elem.tag == "loc":
                     loc = elem.text.strip() if elem.text else ""
                     if loc and loc.startswith(("http://", "https://")):
-                        # Skip non-HTML resources (PDFs, images, etc.)
-                        # Check the URL *path* (ignoring query string)
                         loc_path = urlparse(loc).path.lower()
                         if loc_path.endswith((".pdf", ".jpg", ".jpeg", ".png", ".gif",
                                               ".svg", ".webp", ".zip", ".docx", ".xlsx",
                                               ".pptx", ".doc", ".xls", ".csv", ".mp4",
                                               ".mp3", ".avi", ".mov", ".wmv")):
                             continue
-                        # Accept URLs from same site (www-insensitive)
                         if same_site(urlparse(loc).netloc, base_netloc):
                             urls.append(loc)
 
@@ -134,14 +127,6 @@ async def _fetch_and_parse_sitemap(client: httpx.AsyncClient, sitemap_url: str, 
 
 
 async def run_sitemap_audit(raw_input: str) -> dict:
-    """
-    Main sitemap audit function.
-    1. Normalize the input to a base URL
-    2. Fetch /sitemap.xml
-    3. For each URL in sitemap, check for pagination and discover sub-pages
-    4. Audit headings on each discovered page
-    5. Return structured results
-    """
     from datetime import datetime
     import time
     
@@ -151,7 +136,6 @@ async def run_sitemap_audit(raw_input: str) -> dict:
     base_url = normalize_base_url(raw_input)
     logger.info(f"Starting sitemap audit for: {base_url}")
 
-    # Step 1: Get sitemap URLs
     sitemap_urls = await fetch_sitemap_urls(base_url)
 
     if not sitemap_urls:
@@ -172,7 +156,6 @@ async def run_sitemap_audit(raw_input: str) -> dict:
 
     logger.info(f"Processing {len(sitemap_urls)} URLs from sitemap")
 
-    # Step 2: For each sitemap URL, discover paginated sub-pages and audit headings inside a session context
     groups_map: dict[str, dict] = {}
     all_pages_to_audit: set[str] = set()
     page_to_group: dict[str, str] = {}
@@ -206,7 +189,6 @@ async def run_sitemap_audit(raw_input: str) -> dict:
                 "_pageUrls": normalized_pages,
             }
 
-        # Run discovery with limited concurrency
         discovery_sem = asyncio.Semaphore(4)
         async def guarded_discover(url: str):
             async with discovery_sem:
@@ -219,7 +201,6 @@ async def run_sitemap_audit(raw_input: str) -> dict:
 
         logger.info(f"Total pages to audit after discovery: {len(all_pages_to_audit)}")
 
-        # Step 3: Audit headings on each page
         audit_results: dict[str, dict] = {}
         audit_sem = asyncio.Semaphore(CRAWL_CONCURRENCY)
 

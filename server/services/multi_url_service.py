@@ -76,7 +76,6 @@ async def run_multi_url_audit(raw_urls: list[str]) -> dict:
 
             has_pagination = len(normalized_pages) > 1
 
-            # ALWAYS run detail discovery, whether there's pagination or not
             try:
                 detail_pages = await discover_urls(input_url, context=context, audit_cache=audit_cache)
             except Exception as e:

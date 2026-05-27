@@ -122,7 +122,6 @@ class BrowserManager:
         resource_type = req.resource_type
         url = req.url.lower()
 
-        # Block tracking/analytics domains to prevent navigation delays
         is_tracking = any(domain in url for domain in (
             "google-analytics.com", "googletagmanager.com", "connect.facebook.net",
             "facebook.com", "doubleclick.net", "hotjar.com", "clarity.ms",
@@ -166,7 +165,6 @@ class BrowserManager:
         async with self._sem_tabs:
             ctx = context if context is not None else self._context
             
-            # Check if browser is disconnected before attempting new page
             if self._browser and not self._browser.is_connected():
                 logger.warning("Browser disconnected before page creation in page_in_context. Restarting...")
                 async with self._lock:
@@ -244,7 +242,6 @@ browser_manager = BrowserManager(max_tabs=PLAYWRIGHT_MAX_TABS)
 
 
 async def scroll_down_page(page) -> None:
-    """Perform a full incremental scroll down to trigger lazy loading, then return to top."""
     try:
         await page.evaluate("""
             async () => {

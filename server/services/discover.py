@@ -23,7 +23,6 @@ def same_site(netloc_a: str, netloc_b: str) -> bool:
 
 
 PAGE_PARAM_CANDIDATES = ["page", "pagina", "pg", "p", "offset", "inicio"]
-# Pagination limits completely removed as requested
 
 def normalize_url(url_str: str) -> str:
     try:
@@ -153,7 +152,6 @@ def traverse_pagination_keys(next_data: dict) -> dict:
         pass
     return res
 
-# XHR log interception helper
 CHAVES_LISTA = ("items", "data", "results", "events", "eventos", "products", "produtos", "list", "rows")
 CHAVES_TOTAL = ("totalpages", "total_pages", "pagecount", "page_count", "total", "totalitems", "total_items")
 
@@ -273,14 +271,12 @@ async def discover_paginated_pages(start_url: str, context=None, audit_cache: di
             except Exception as e:
                 logger.warning(f"Timeout on initial pagination discovery load: {e}")
 
-            # Accept cookies
             try:
                 await page.evaluate(JS_COOKIE_ACCEPT)
                 await asyncio.sleep(0.3)
             except Exception:
                 pass
 
-            # Full scroll down to trigger dynamic loading of elements/images/links
             await scroll_down_page(page)
 
             try:
@@ -364,12 +360,10 @@ async def discover_paginated_pages(start_url: str, context=None, audit_cache: di
 
                     try:
                         await page.goto(normalized_next, wait_until="domcontentloaded", timeout=15000)
-                        # Accept cookies
                         try:
                             await page.evaluate(JS_COOKIE_ACCEPT)
                         except Exception:
                             pass
-                        # Scroll down on subsequent listing page
                         await scroll_down_page(page)
 
                         try:
@@ -644,10 +638,8 @@ async def discover_urls(start_url: str, context=None, audit_cache: dict = None) 
     normalized_start_url = normalize_url(start_url)
     visited_listing_pages.add(normalized_start_url)
     
-    # 1. Open the browser and visit the start URL
     page_ctx = browser_manager.page_in_context(context) if context else browser_manager.page()
     async with page_ctx as page:
-        # Attach response handler to intercept XHR/JSON APIs
         async def on_response(response):
             nonlocal api_captured
             try:
@@ -679,31 +671,26 @@ async def discover_urls(start_url: str, context=None, audit_cache: dict = None) 
             except Exception as e:
                 logger.warning(f"Timeout on initial load: {e}")
 
-            # Accept cookies
             try:
                 await page.evaluate(JS_COOKIE_ACCEPT)
                 await asyncio.sleep(0.3)
             except Exception:
                 pass
 
-            # Full scroll down to trigger lazy load before extracting listing elements
             await scroll_down_page(page)
 
-            # Wait for listings using DOM stabilization
             try:
                 await page.evaluate(JS_AGUARDAR_ESTABILIDADE)
             except Exception:
                 pass
             await asyncio.sleep(0.5)
 
-            # Detect pagination DOM
             try:
                 dom_pag = await page.evaluate(JS_DETETAR_PAGINACAO)
             except Exception as e:
                 logger.warning(f"Failed to detect pagination: {e}")
                 dom_pag = {}
 
-            # Extract next data
             try:
                 html = await page.content()
                 next_data = extract_next_data(html)
@@ -711,13 +698,11 @@ async def discover_urls(start_url: str, context=None, audit_cache: dict = None) 
                 next_data = None
                 html = ""
 
-            # Compute pagination details
             total_pages = 1
             param_name = "page"
             next_href = ""
             detection_source = ""
 
-            # Query param checks
             url_param_name, url_param_val = parse_page_param(normalized_start_url)
             if url_param_name:
                 param_name = url_param_name
@@ -746,7 +731,6 @@ async def discover_urls(start_url: str, context=None, audit_cache: dict = None) 
 
             logger.info(f"Pagination Detection Source: {detection_source}, total={total_pages}, param={param_name}")
 
-            # Extract initial detail links
             try:
                 initial_links = await page.evaluate(JS_EXTRACT_DETAIL_LINKS, [normalized_start_url, DETAIL_PATH_IGNORES.pattern])
                 for link in initial_links:
@@ -754,13 +738,11 @@ async def discover_urls(start_url: str, context=None, audit_cache: dict = None) 
             except Exception as e:
                 logger.warning(f"Error extracting detail links from start URL: {e}")
 
-            # If pagination total is found, build page URLs
             pages_to_crawl = []
             if total_pages > 1:
                 for page_num in range(2, total_pages + 1):
                     pages_to_crawl.append(build_page_url(normalized_start_url, page_num, param_name))
             elif next_href:
-                # Let's start following sequentially up to max pages if no total count
                 curr_next = next_href
                 visited_listing_pages.add(normalize_url(curr_next))
                 pages_to_crawl.append(curr_next)
@@ -770,10 +752,6 @@ async def discover_urls(start_url: str, context=None, audit_cache: dict = None) 
             except Exception:
                 pass
 
-
-    # 2. Visit other pagination pages
-    # We can do this in parallel to save a lot of time!
-    # We limit active concurrent listing page crawls to 4
     sem = asyncio.Semaphore(4)
 
     async def crawl_listing_page(list_url: str):
@@ -789,13 +767,11 @@ async def discover_urls(start_url: str, context=None, audit_cache: dict = None) 
                 async with page_ctx_sub as page:
                     await page.goto(resolved, wait_until="domcontentloaded", timeout=15000)
                     
-                    # Accept cookies
                     try:
                         await page.evaluate(JS_COOKIE_ACCEPT)
                     except Exception:
                         pass
                     
-                    # Dynamic full scroll down
                     await scroll_down_page(page)
 
                     try:
@@ -813,7 +789,6 @@ async def discover_urls(start_url: str, context=None, audit_cache: dict = None) 
     if pages_to_crawl:
         await asyncio.gather(*(crawl_listing_page(u) for u in pages_to_crawl), return_exceptions=True)
 
-    # Filter by origin
     start_origin = normalized_start_url
     filtered_urls = []
     for href in discovered_detail_urls:

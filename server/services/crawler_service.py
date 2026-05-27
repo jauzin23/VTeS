@@ -19,7 +19,6 @@ from .html_processor import inject_iframe_script
 
 logger = logging.getLogger("tes.crawler_service")
 
-# Extensions to ignore during link discovery
 EXTENSOES_IGNORAR = (
     ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
     ".zip", ".rar", ".gz", ".tar", ".7z", ".exe", ".kmz", ".kml",
@@ -120,7 +119,6 @@ def normalize_crawler_url(url_str: str) -> str:
         p = urlparse(normalized)
         if p.query:
             partes = parse_qsl(p.query, keep_blank_values=True)
-            # Remove tracking and analytical query params
             filtradas = [
                 (k, v) for k, v in partes
                 if not k.lower().startswith(("utm_", "fbclid", "gclid", "_ga", "_gl", "msclkid"))
@@ -143,7 +141,6 @@ def filter_and_normalize_links(links: list[str], target_host: str, seed_netloc: 
             continue
         p = urlparse(normalized)
         
-        # Normalize www vs non-www to match seed_netloc precisely if they are the same site
         if same_site(p.netloc, seed_netloc):
             normalized = urlunparse((p.scheme, seed_netloc, p.path, p.params, p.query, p.fragment))
             p = urlparse(normalized)
@@ -177,14 +174,12 @@ def extract_static_links_and_markers(html: str, current_url: str):
             resolved_url = urljoin(base_href or current_url, href.strip())
             static_links.append(resolved_url)
             
-        # Check next/spa markers in script tags
         for script in parser.css("script"):
             src = script.attributes.get("src") or ""
             if "_next/static" in src or "webpack-" in src or "chunk-" in src:
                 has_spa_markers = True
                 break
         
-        # Check next data
         if parser.css_first("script#__NEXT_DATA__"):
             has_spa_markers = True
             
@@ -261,7 +256,6 @@ async def extract_links_with_playwright(
                 if stop_event.is_set():
                     return links
 
-                # Accept cookies (try multiple times to catch delayed banners)
                 for _ in range(3):
                     try:
                         await page.evaluate(JS_COOKIE_ACCEPT)
@@ -272,24 +266,20 @@ async def extract_links_with_playwright(
                 if stop_event.is_set():
                     return links
 
-                # Wait for generic content elements to verify the loader is gone
                 try:
                     await page.wait_for_selector('a[href], article, main, h1, h2', timeout=5000)
                 except Exception:
                     pass
 
-                # Full scroll down to ensure dynamic content / lazy loaded links are rendered
                 await scroll_down_page(page)
 
                 if stop_event.is_set():
                     return links
 
-                # Extract links using JS
                 extracted = await page.evaluate(JS_EXTRACT_LINKS)
                 if extracted:
                     links = [str(l) for l in extracted]
 
-                # Detect pagination
                 try:
                     dom_pag = await page.evaluate(JS_DETETAR_PAGINACAO)
                 except Exception as e:
@@ -406,11 +396,9 @@ async def crawl_worker(
                 audit_cache=audit_cache
             )
 
-            # Filter and normalize links
             seed_netloc = urlparse(seed_url).netloc
             filtered_links = filter_and_normalize_links(raw_links, target_host, seed_netloc)
 
-            # Enqueue newly discovered links
             for normalized in filtered_links:
                 async with lock:
                     if normalized not in discovered_set and len(discovered_set) < max_pages and not stop_event.is_set():
@@ -475,7 +463,6 @@ async def discover_all_links_concurrent(seed_url: str, max_pages: int = 100, con
             )
             workers.append(worker)
 
-        # Wait until the queue is fully processed or we reach our limit
         queue_join_task = asyncio.create_task(queue.join())
         try:
             while not queue_join_task.done():
@@ -488,7 +475,6 @@ async def discover_all_links_concurrent(seed_url: str, max_pages: int = 100, con
             stop_event.set()
             queue_join_task.cancel()
             
-            # Close all active pages to abort their network operations immediately
             async with active_pages_lock:
                 for page in list(active_pages):
                     try:
@@ -496,7 +482,6 @@ async def discover_all_links_concurrent(seed_url: str, max_pages: int = 100, con
                     except Exception:
                         pass
             
-            # Wait for workers to exit cleanly
             try:
                 await asyncio.wait_for(asyncio.gather(*workers, return_exceptions=True), timeout=3.0)
             except asyncio.TimeoutError:
@@ -623,7 +608,6 @@ async def run_crawler_audit(raw_input: str, max_pages: int = 100) -> dict:
             return_exceptions=True
         )
 
-    # Sort results by URL
     results.sort(key=lambda r: r["url"])
 
     total_issues = sum(r["issueCount"] for r in results)
