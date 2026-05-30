@@ -11,14 +11,14 @@ services:
       - CACHE_MAX_SIZE=200
       - CACHE_TTL_SECONDS=600
       # Fila e Gestão de Concorrência
-      - MAX_CONCURRENT_TASKS=1
+      - MAX_CONCURRENT_TASKS=2
       - MAX_QUEUE_SIZE=10
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: "2.0"
-          memory: 1G
+    #deploy:
+    # resources:
+    #  limits:
+    #   cpus: "2.0"
+    #  memory: 1G
 
   frontend:
     build:

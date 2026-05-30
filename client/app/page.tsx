@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   Loader2,
   Search,
@@ -31,6 +31,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Collapsible,
   CollapsibleContent,
@@ -154,6 +161,192 @@ function HeadingTree({
 function extractText(html?: string): string {
   if (!html) return "";
   return html.replace(/<[^>]*>/g, "").trim();
+}
+
+type PageFilter = "all" | "fail" | "warn" | "ok";
+type PageSort =
+  | "red-first"
+  | "issues-desc"
+  | "issues-asc"
+  | "url-asc"
+  | "url-desc";
+
+function normalizeText(value: string) {
+  return value.toLowerCase().trim();
+}
+
+function getPageStats(page: SitemapPageResult) {
+  const failCount = page.issues?.filter((i) => i.severity === "FAIL").length ?? 0;
+  const reviewCount =
+    page.issues?.filter((i) => i.severity === "REVIEW").length ?? 0;
+  const issueCount = page.issueCount ?? page.issues?.length ?? 0;
+  const severityRank =
+    page.status === "ERROR" ? 3 : failCount > 0 ? 2 : reviewCount > 0 ? 1 : 0;
+
+  return { failCount, reviewCount, issueCount, severityRank };
+}
+
+function getPageSearchText(page: SitemapPageResult) {
+  return normalizeText(
+    [
+      page.url,
+      page.finalUrl,
+      page.status,
+      page.error ?? "",
+      ...(page.headings?.map((heading) => heading.text) ?? []),
+      ...(page.issues?.flatMap((issue) => [issue.rule, issue.message, issue.element ?? ""]) ?? []),
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
+}
+
+function filterAndSortPages(
+  pages: SitemapPageResult[],
+  {
+    filter,
+    sort,
+    query,
+  }: {
+    filter: PageFilter;
+    sort: PageSort;
+    query: string;
+  },
+) {
+  const normalizedQuery = normalizeText(query);
+
+  const filtered = pages.filter((page) => {
+    const { failCount, reviewCount } = getPageStats(page);
+    let matchesFilter = true;
+
+    if (filter === "fail") matchesFilter = page.status === "ERROR" || failCount > 0;
+    if (filter === "warn")
+      matchesFilter = page.status !== "ERROR" && failCount === 0 && reviewCount > 0;
+    if (filter === "ok")
+      matchesFilter = page.status !== "ERROR" && failCount === 0 && reviewCount === 0;
+
+    if (!matchesFilter) return false;
+
+    if (!normalizedQuery) return true;
+
+    return getPageSearchText(page).includes(normalizedQuery);
+  });
+
+  return [...filtered].sort((a, b) => {
+    const statsA = getPageStats(a);
+    const statsB = getPageStats(b);
+    const urlA = (a.finalUrl || a.url).toLowerCase();
+    const urlB = (b.finalUrl || b.url).toLowerCase();
+
+    if (sort === "url-asc") return urlA.localeCompare(urlB);
+    if (sort === "url-desc") return urlB.localeCompare(urlA);
+    if (sort === "issues-asc") {
+      const byIssues = statsA.issueCount - statsB.issueCount;
+      if (byIssues !== 0) return byIssues;
+      return urlA.localeCompare(urlB);
+    }
+
+    const sortByRedness =
+      statsB.severityRank - statsA.severityRank ||
+      statsB.issueCount - statsA.issueCount ||
+      urlA.localeCompare(urlB);
+
+    if (sort === "issues-desc") {
+      const byIssues = statsB.issueCount - statsA.issueCount;
+      if (byIssues !== 0) return byIssues;
+      return sortByRedness;
+    }
+
+    return sortByRedness;
+  });
+}
+
+function ListControls({
+  query,
+  setQuery,
+  filter,
+  setFilter,
+  sort,
+  setSort,
+  resultCount,
+  totalCount,
+  searchPlaceholder = "Pesquisar por URL, erro, regra ou conteúdo...",
+}: {
+  query: string;
+  setQuery: (value: string) => void;
+  filter: PageFilter;
+  setFilter: (value: PageFilter) => void;
+  sort: PageSort;
+  setSort: (value: PageSort) => void;
+  resultCount: number;
+  totalCount: number;
+  searchPlaceholder?: string;
+}) {
+  return (
+    <div className="rounded-xl border bg-white p-3 shadow-sm space-y-3">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="relative w-full xl:max-w-xl">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={searchPlaceholder}
+            className="pl-9 pr-9"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              Limpar
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center xl:justify-end">
+          <Select value={sort} onValueChange={(value) => setSort(value as PageSort)}>
+            <SelectTrigger className="w-full sm:w-[210px]">
+              <SelectValue placeholder="Ordenar" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="red-first">Mais graves primeiro</SelectItem>
+              <SelectItem value="issues-desc">Mais problemas primeiro</SelectItem>
+              <SelectItem value="issues-asc">Menos problemas primeiro</SelectItem>
+              <SelectItem value="url-asc">URL A-Z</SelectItem>
+              <SelectItem value="url-desc">URL Z-A</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <div className="text-xs text-muted-foreground sm:text-right">
+            <span className="font-medium text-foreground">{resultCount}</span> de {totalCount}
+            {totalCount !== 1 ? " resultados" : " resultado"}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-muted-foreground">Filtrar:</span>
+        {(["all", "fail", "warn", "ok"] as const).map((f) => (
+          <Button
+            key={f}
+            size="sm"
+            variant={filter === f ? "default" : "outline"}
+            className="h-7 text-xs"
+            onClick={() => setFilter(f)}
+          >
+            {f === "all"
+              ? "Todas"
+              : f === "fail"
+                ? "Com falhas"
+                : f === "warn"
+                  ? "Com avisos"
+                  : "Sem problemas"}
+          </Button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 // ─── Issue List ───────────────────────────────────────────────────────────────
@@ -761,7 +954,9 @@ function SitemapAudit() {
   const [domain, setDomain] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SitemapAuditResult | null>(null);
-  const [filter, setFilter] = useState<"all" | "fail" | "warn" | "ok">("all");
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<PageFilter>("all");
+  const [sort, setSort] = useState<PageSort>("red-first");
 
   async function handleSitemap(e: React.FormEvent) {
     e.preventDefault();
@@ -797,19 +992,10 @@ function SitemapAudit() {
     }
   }
 
-  const filteredPages =
-    result?.pages.filter((p) => {
-      const failCount =
-        p.issues?.filter((i) => i.severity === "FAIL").length ?? 0;
-      const reviewCount =
-        p.issues?.filter((i) => i.severity === "REVIEW").length ?? 0;
-      if (filter === "fail") return p.status === "ERROR" || failCount > 0;
-      if (filter === "warn")
-        return p.status !== "ERROR" && failCount === 0 && reviewCount > 0;
-      if (filter === "ok")
-        return p.status !== "ERROR" && failCount === 0 && reviewCount === 0;
-      return true;
-    }) ?? [];
+  const filteredPages = useMemo(
+    () => filterAndSortPages(result?.pages ?? [], { filter, sort, query }),
+    [result?.pages, filter, sort, query],
+  );
 
   return (
     <div className="space-y-6">
@@ -1031,31 +1217,16 @@ function SitemapAudit() {
             </p>
           )}
 
-          {/* Filters */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-muted-foreground">Filtrar:</span>
-            {(["all", "fail", "warn", "ok"] as const).map((f) => (
-              <Button
-                key={f}
-                size="sm"
-                variant={filter === f ? "default" : "outline"}
-                className="h-7 text-xs"
-                onClick={() => setFilter(f)}
-              >
-                {f === "all"
-                  ? "Todas"
-                  : f === "fail"
-                    ? "Com falhas"
-                    : f === "warn"
-                      ? "Com avisos"
-                      : "Sem problemas"}
-              </Button>
-            ))}
-            <span className="text-xs text-muted-foreground ml-auto">
-              {filteredPages.length} resultado
-              {filteredPages.length !== 1 ? "s" : ""}
-            </span>
-          </div>
+          <ListControls
+            query={query}
+            setQuery={setQuery}
+            filter={filter}
+            setFilter={setFilter}
+            sort={sort}
+            setSort={setSort}
+            resultCount={filteredPages.length}
+            totalCount={result?.pages.length ?? 0}
+          />
 
           {/* Pages list */}
           <Card className="shadow-sm overflow-hidden">
@@ -1085,7 +1256,9 @@ function CrawlerAudit() {
   const [limitPages, setLimitPages] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<CrawlerAuditResult | null>(null);
-  const [filter, setFilter] = useState<"all" | "fail" | "warn" | "ok">("all");
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<PageFilter>("all");
+  const [sort, setSort] = useState<PageSort>("red-first");
 
   async function handleCrawler(e: React.FormEvent) {
     e.preventDefault();
@@ -1121,19 +1294,10 @@ function CrawlerAudit() {
     }
   }
 
-  const filteredPages =
-    result?.pages.filter((p) => {
-      const failCount =
-        p.issues?.filter((i) => i.severity === "FAIL").length ?? 0;
-      const reviewCount =
-        p.issues?.filter((i) => i.severity === "REVIEW").length ?? 0;
-      if (filter === "fail") return p.status === "ERROR" || failCount > 0;
-      if (filter === "warn")
-        return p.status !== "ERROR" && failCount === 0 && reviewCount > 0;
-      if (filter === "ok")
-        return p.status !== "ERROR" && failCount === 0 && reviewCount === 0;
-      return true;
-    }) ?? [];
+  const filteredPages = useMemo(
+    () => filterAndSortPages(result?.pages ?? [], { filter, sort, query }),
+    [result?.pages, filter, sort, query],
+  );
 
   return (
     <div className="space-y-6">
@@ -1386,31 +1550,16 @@ function CrawlerAudit() {
             </p>
           )}
 
-          {/* Filters */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-muted-foreground">Filtrar:</span>
-            {(["all", "fail", "warn", "ok"] as const).map((f) => (
-              <Button
-                key={f}
-                size="sm"
-                variant={filter === f ? "default" : "outline"}
-                className="h-7 text-xs"
-                onClick={() => setFilter(f)}
-              >
-                {f === "all"
-                  ? "Todas"
-                  : f === "fail"
-                    ? "Com falhas"
-                    : f === "warn"
-                      ? "Com avisos"
-                      : "Sem problemas"}
-              </Button>
-            ))}
-            <span className="text-xs text-muted-foreground ml-auto">
-              {filteredPages.length} resultado
-              {filteredPages.length !== 1 ? "s" : ""}
-            </span>
-          </div>
+          <ListControls
+            query={query}
+            setQuery={setQuery}
+            filter={filter}
+            setFilter={setFilter}
+            sort={sort}
+            setSort={setSort}
+            resultCount={filteredPages.length}
+            totalCount={result?.pages.length ?? 0}
+          />
 
           {/* Pages list */}
           <Card className="shadow-sm overflow-hidden">
@@ -1438,6 +1587,9 @@ function MultiUrlPaginationAudit() {
   const [value, setValue] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<MultiUrlAuditResult | null>(null);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<PageFilter>("all");
+  const [sort, setSort] = useState<PageSort>("red-first");
 
   async function handleMultiAudit(e: React.FormEvent) {
     e.preventDefault();
@@ -1472,6 +1624,38 @@ function MultiUrlPaginationAudit() {
       setLoading(false);
     }
   }
+
+  const visibleGroups = useMemo(() => {
+    if (!result) return [];
+
+    const normalizedQuery = normalizeText(query);
+
+    return result.groups
+      .map((group) => {
+        const groupMatchesQuery =
+          !!normalizedQuery && normalizeText(group.inputUrl).includes(normalizedQuery);
+        const pages = filterAndSortPages(group.pages, {
+          filter,
+          sort,
+          query: groupMatchesQuery ? "" : query,
+        });
+
+        if (!groupMatchesQuery && pages.length === 0) return null;
+
+        return {
+          ...group,
+          pages,
+        };
+      })
+      .filter(
+        (group): group is MultiUrlAuditResult["groups"][number] => group !== null,
+      );
+  }, [result, filter, sort, query]);
+
+  const visiblePageCount = visibleGroups.reduce(
+    (sum, group) => sum + group.pages.length,
+    0,
+  );
 
   return (
     <div className="space-y-6">
@@ -1673,8 +1857,20 @@ function MultiUrlPaginationAudit() {
             </p>
           )}
 
+          <ListControls
+            query={query}
+            setQuery={setQuery}
+            filter={filter}
+            setFilter={setFilter}
+            sort={sort}
+            setSort={setSort}
+            resultCount={visiblePageCount}
+            totalCount={result.totalPages}
+            searchPlaceholder="Pesquisar por URL do grupo, página, erro ou regra..."
+          />
+
           <div className="space-y-4">
-            {result.groups.map((group) => (
+            {visibleGroups.map((group) => (
               <Card
                 key={group.inputUrl}
                 className="shadow-sm overflow-hidden py-2"
@@ -1693,8 +1889,8 @@ function MultiUrlPaginationAudit() {
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="outline" className="text-xs">
-                        {group.pageCount} página
-                        {group.pageCount !== 1 ? "s" : ""}
+                        {group.pages.length} página
+                        {group.pages.length !== 1 ? "s" : ""}
                       </Badge>
                       <Badge
                         className={
@@ -1715,13 +1911,19 @@ function MultiUrlPaginationAudit() {
                   </div>
                 </CardHeader>
                 <div className="divide-y">
-                  {group.pages.map((page, index) => (
-                    <SitemapPageRow
-                      key={`${group.inputUrl}-${page.url}`}
-                      page={page}
-                      index={index}
-                    />
-                  ))}
+                  {group.pages.length === 0 ? (
+                    <div className="p-8 text-center text-muted-foreground text-sm">
+                      Nenhuma página corresponde ao filtro selecionado.
+                    </div>
+                  ) : (
+                    group.pages.map((page, index) => (
+                      <SitemapPageRow
+                        key={`${group.inputUrl}-${page.url}`}
+                        page={page}
+                        index={index}
+                      />
+                    ))
+                  )}
                 </div>
               </Card>
             ))}

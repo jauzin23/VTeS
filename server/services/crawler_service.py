@@ -42,6 +42,83 @@ JS_COOKIE_ACCEPT = r"""
 }
 """
 
+JS_EXPANDIR_MENUS = r"""
+async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    
+    const botoesMenu = Array.from(document.querySelectorAll("button, a, div")).filter(el => {
+        const txt = (el.innerText || "").toLowerCase();
+        return txt === "menu" || txt === "menu x" || el.classList.contains("burger") || el.id?.includes("menu");
+    });
+    
+    for (const b of botoesMenu) {
+        if (b.getBoundingClientRect().width > 0) {
+            b.click();
+            await sleep(500);
+        }
+    }
+
+    const seletoresExpander = [
+        "[class*='arrow']", "[class*='chevron']", "[class*='plus']",
+        "button[aria-expanded='false']", "li[aria-haspopup='true']",
+        ".ant-menu-submenu-title", ".menu-item-has-children"
+    ];
+    
+    let totalClicados = 0;
+    let novasTentativas = 3;
+    
+    while (novasTentativas > 0) {
+        const elementos = document.querySelectorAll(seletoresExpander.join(","));
+        let clicadosNestaRonda = 0;
+        
+        for (const el of elementos) {
+            if (totalClicados > 30) break;
+            
+            if (el.getAttribute("aria-expanded") === "true") continue;
+            
+            const r = el.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0 && r.top < window.innerHeight) {
+                try {
+                    el.click();
+                    clicadosNestaRonda++;
+                    totalClicados++;
+                    await sleep(300);
+                } catch(e){}
+            }
+        }
+        if (clicadosNestaRonda === 0) break;
+        novasTentativas--;
+    }
+    
+    return totalClicados;
+}
+"""
+
+JS_AGUARDAR_ESTABILIDADE = r"""
+async () => {
+    return new Promise(resolve => {
+        let lastCount = 0;
+        let sameCount = 0;
+        const check = () => {
+            const currentCount = document.querySelectorAll('img, a[href]').length;
+            if (currentCount === lastCount && currentCount > 0) {
+                sameCount++;
+            } else {
+                sameCount = 0;
+            }
+            lastCount = currentCount;
+            if (sameCount >= 6 || (currentCount > 30 && sameCount >= 3)) {
+                resolve(true);
+            } else {
+                setTimeout(check, 400);
+            }
+        };
+        check();
+        setTimeout(() => resolve(false), 8000);
+    });
+}
+"""
+
 JS_EXTRACT_LINKS = r"""
 () => {
     const links = new Set();
@@ -99,12 +176,16 @@ JS_EXTRACT_LINKS = r"""
 }
 """
 
-def strip_www(netloc: str) -> str:
+def get_base_domain(netloc: str) -> str:
     n = netloc.lower()
-    return n[4:] if n.startswith("www.") else n
+    if n.startswith("www."):
+        n = n[4:]
+    return n
 
 def same_site(netloc_a: str, netloc_b: str) -> bool:
-    return strip_www(netloc_a) == strip_www(netloc_b)
+    a = get_base_domain(netloc_a)
+    b = get_base_domain(netloc_b)
+    return a == b or a.endswith("." + b) or b.endswith("." + a)
 
 def is_valid_url(url: str) -> bool:
     try:
@@ -174,16 +255,9 @@ def extract_static_links_and_markers(html: str, current_url: str):
             resolved_url = urljoin(base_href or current_url, href.strip())
             static_links.append(resolved_url)
             
-        for script in parser.css("script"):
-            src = script.attributes.get("src") or ""
-            if "_next/static" in src or "webpack-" in src or "chunk-" in src:
-                has_spa_markers = True
-                break
-        
-        if parser.css_first("script#__NEXT_DATA__"):
-            has_spa_markers = True
-            
-        if "_next/static" in html or "window.__NEXT_DATA__" in html or "id=\"__next\"" in html or "id=\"root\"" in html:
+        # Remove aggressive static Next.js markers that force Playwright for SSG pages.
+        # Fallback to SPA only if the HTML lacks sufficient static links (indicative of pure CSR).
+        if len(static_links) < 10:
             has_spa_markers = True
             
     except Exception as e:
@@ -226,15 +300,41 @@ async def extract_links_with_playwright(
     active_pages: list,
     pages_lock: asyncio.Lock,
     stop_event: asyncio.Event,
-    context=None,
-    audit_cache: dict = None
+    context=None
 ) -> list[str]:
     links = []
     if stop_event.is_set():
         return links
+        
+    from .discover import inspect_xhr_response
+    api_captured = None
+    
     try:
         page_ctx = browser_manager.page_in_context(context) if context else browser_manager.page()
         async with page_ctx as page:
+            async def on_response(response):
+                nonlocal api_captured
+                try:
+                    ct = (response.headers.get("content-type") or "").lower()
+                    if "json" not in ct:
+                        return
+                    if response.request.method.upper() not in ("GET", "POST"):
+                        return
+                    if response.status >= 400:
+                        return
+                    data = await response.json()
+                    meta = inspect_xhr_response(data)
+                    if meta and meta.get("totalPages"):
+                        api_captured = {
+                            "url": response.request.url,
+                            "method": response.request.method,
+                            "totalPages": meta["totalPages"],
+                        }
+                except Exception:
+                    pass
+
+            page.on("response", on_response)
+            
             async with pages_lock:
                 active_pages.append(page)
             try:
@@ -272,6 +372,16 @@ async def extract_links_with_playwright(
                     pass
 
                 await scroll_down_page(page)
+                
+                try:
+                    await page.evaluate(JS_EXPANDIR_MENUS)
+                except Exception as e:
+                    logger.warning(f"Failed to expand menus on {url}: {e}")
+                    
+                try:
+                    await page.evaluate(JS_AGUARDAR_ESTABILIDADE)
+                except Exception as e:
+                    logger.warning(f"Failed to wait for stability on {url}: {e}")
 
                 if stop_event.is_set():
                     return links
@@ -289,8 +399,6 @@ async def extract_links_with_playwright(
                 try:
                     html = await page.content()
                     next_data = extract_next_data(html)
-                    if html and audit_cache is not None:
-                        await audit_and_cache_page(page, url, html, audit_cache)
                 except Exception:
                     next_data = None
 
@@ -302,7 +410,7 @@ async def extract_links_with_playwright(
                 if url_param_name:
                     param_name = url_param_name
 
-                if dom_pag.get("has_pagination_class", False):
+                if dom_pag.get("has_pagination_class", False) or api_captured or dom_pag.get("amostra_paginacao"):
                     next_href = normalize_url(dom_pag.get("nextHref") or "") if dom_pag.get("nextHref") else ""
 
                     if next_data:
@@ -313,6 +421,9 @@ async def extract_links_with_playwright(
                     dom_total = dom_pag.get("paginacao_total") or 0
                     if dom_total > 1:
                         total_pages = max(total_pages, int(dom_total))
+                        
+                    if api_captured and api_captured.get("totalPages"):
+                        total_pages = max(total_pages, int(api_captured["totalPages"]))
 
                     if dom_pag.get("parametro_pagina"):
                         param_name = dom_pag["parametro_pagina"]
@@ -343,6 +454,10 @@ async def extract_links_with_playwright(
                     links.append(next_href)
 
             finally:
+                try:
+                    page.remove_listener("response", on_response)
+                except Exception:
+                    pass
                 async with pages_lock:
                     if page in active_pages:
                         active_pages.remove(page)
@@ -364,12 +479,11 @@ async def crawl_worker(
     stop_event: asyncio.Event,
     active_pages: list,
     active_pages_lock: asyncio.Lock,
-    context=None,
-    audit_cache: dict = None
+    context=None
 ):
     while not stop_event.is_set():
         try:
-            current_url = await asyncio.wait_for(queue.get(), timeout=0.5)
+            current_url = await asyncio.wait_for(queue.get(), timeout=1.0)
         except asyncio.TimeoutError:
             continue
         except asyncio.CancelledError:
@@ -384,17 +498,19 @@ async def crawl_worker(
         logger.info(f"Crawler fetching: {current_url}")
         
         raw_links = []
+        html = None
+        has_spa_markers = False
         
         try:
-            logger.info(f"Crawling {current_url} via Playwright")
-            raw_links = await extract_links_with_playwright(
+            logger.info(f"Crawling {current_url} via Playwright (Always-on mode)")
+            pw_links = await extract_links_with_playwright(
                 current_url,
                 active_pages,
                 active_pages_lock,
                 stop_event,
-                context=context,
-                audit_cache=audit_cache
+                context=context
             )
+            raw_links.extend(pw_links)
 
             seed_netloc = urlparse(seed_url).netloc
             filtered_links = filter_and_normalize_links(raw_links, target_host, seed_netloc)
@@ -410,13 +526,13 @@ async def crawl_worker(
         finally:
             queue.task_done()
 
-async def discover_all_links_concurrent(seed_url: str, max_pages: int = 100, concurrency: int = 5, context=None, audit_cache: dict = None) -> list[str]:
+async def discover_all_links_concurrent(seed_url: str, max_pages: int = 100, concurrency: int = 5, context=None) -> list[str]:
     seed_url = normalize_crawler_url(seed_url)
     if not is_valid_url(seed_url):
         return []
 
     parsed_seed = urlparse(seed_url)
-    target_host = strip_www(parsed_seed.netloc)
+    target_host = get_base_domain(parsed_seed.netloc)
 
     discovered_set = {seed_url}
     discovered_list = [seed_url]
@@ -457,8 +573,7 @@ async def discover_all_links_concurrent(seed_url: str, max_pages: int = 100, con
                     stop_event,
                     active_pages,
                     active_pages_lock,
-                    context=context,
-                    audit_cache=audit_cache
+                    context=context
                 )
             )
             workers.append(worker)
@@ -525,7 +640,7 @@ async def run_crawler_audit(raw_input: str, max_pages: int = 100) -> dict:
 
     async with browser_manager.session_context(seed_url=base_url) as context:
         try:
-            discovered_urls = await discover_all_links_concurrent(base_url, max_pages=max_pages, context=context, audit_cache=audit_cache)
+            discovered_urls = await discover_all_links_concurrent(base_url, max_pages=max_pages, context=context)
         except Exception as e:
             logger.exception("Failed link discovery in crawler")
             finalized_at = datetime.utcnow().isoformat() + "Z"
